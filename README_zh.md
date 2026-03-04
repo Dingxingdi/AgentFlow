@@ -69,8 +69,18 @@ AgentFlow 通过三阶段 pipeline 合成高质量的 agent 训练数据：**Tra
 ```bash
 git clone https://github.com/OpenDCAI/AgentFlow
 cd AgentFlow
-pip install -e .
+bash install.sh          # 安装核心依赖
 ```
+
+可选依赖：
+
+```bash
+bash install.sh --ml     # + ML/DL（torch、transformers 等）
+bash install.sh --cloud  # + 阿里云 SDK
+bash install.sh --all    # 安装全部依赖
+```
+
+所有依赖项详见 [`requirements.txt`](requirements.txt)，运行 `bash install.sh --help` 查看更多选项。
 
 ## 🛠️ 快速开始
 
