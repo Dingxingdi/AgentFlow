@@ -278,7 +278,7 @@ def main():
     parser.add_argument("--max-workers", type=int, default=None,
                        help="Maximum parallel workers")
     parser.add_argument("--metric", type=str, default=None,
-                       choices=["exact_match", "f1_score", "contains_answer", "numeric_match", "llm_judgement"],
+                       choices=["exact_match", "f1_score", "contains_answer", "numeric_match", "llm_judgement", "DocBench_LasJ", "MMLongBench-Doc_LasJ", "MMLongBench-Doc_F1", "MMLongBench-Doc_Acc"],
                        help="Evaluation metric (overrides config)")
     
     args = parser.parse_args()

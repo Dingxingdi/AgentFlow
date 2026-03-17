@@ -44,7 +44,7 @@ class RolloutConfig:
 
     # Evaluation configuration
     evaluate_results: bool = True
-    evaluation_metric: str = "exact_match"  # exact_match, f1_score, contains_answer, numeric_match, llm_judgement
+    evaluation_metric: str = "exact_match"  # exact_match, f1_score, contains_answer, numeric_match, llm_judgement, DocBench_LasJ, MMLongBench-Doc_LasJ, MMLongBench-Doc_F1, MMLongBench-Doc_Acc
     evaluator_model_name: Optional[str] = None
     evaluator_api_key: Optional[str] = None
     evaluator_base_url: Optional[str] = None
@@ -224,7 +224,7 @@ class RolloutConfig:
         if not (0.0 <= self.evaluator_temperature <= 2.0):
             errors.append("evaluator_temperature must be in [0.0, 2.0]")
 
-        valid_metrics = ["exact_match", "f1_score", "similarity", "contains_answer", "numeric_match", "llm_judgement"]
+        valid_metrics = ["exact_match", "f1_score", "similarity", "contains_answer", "numeric_match", "llm_judgement", "DocBench_LasJ", "MMLongBench-Doc_LasJ", "MMLongBench-Doc_F1", "MMLongBench-Doc_Acc"]
         if self.evaluation_metric not in valid_metrics:
             errors.append(f"evaluation_metric must be one of {valid_metrics}")
 

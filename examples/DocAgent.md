@@ -1,6 +1,6 @@
-# 💃 DocDancer: Towards Agentic Document-Grounded Information Seeking
+# 📜 DocAgent: Towards Agentic Document-Grounded Information Seeking
 
-This guide walks through the full pipeline of using the AgentFlow framework with **DocDancer (Doc QA Agent)**, from data synthesis to model inference.
+This guide walks through the full pipeline of using the AgentFlow framework with **DocAgent (Doc QA Agent)**, from data synthesis to model inference.
 
 ## 📋 Table of Contents
 
@@ -19,13 +19,13 @@ This guide walks through the full pipeline of using the AgentFlow framework with
 
 ## Overview
 
-DocDancer is a **Document Understanding agent** that answers complex multi-hop reasoning questions in long and multimodal element documents by searching and reading the content. The pipeline has five stages:
+DocAgent is a **Document Understanding agent** that answers complex multi-hop reasoning questions in long and multimodal element documents by searching and reading the content. The pipeline has five stages:
 
 ```
 Sandbox Setup → QA Synthesis → Trajectory Synthesis → Model Training → Inference & Evaluation
 ```
 
-AgentFlow provides two core tools for DocDancer:
+AgentFlow provides two core tools for DocAgent:
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -46,7 +46,7 @@ pip install -e .
 
 2. **Prepare API Keys**
 
-The DocDancer Sandbox requires the following external services (configured in `configs/sandbox-server/doc_config.json`):
+The DocAgent Sandbox requires the following external services (configured in `configs/sandbox-server/doc_config.json`):
 
 - **OpenAI-compatible API Key**: For LLM calls (supports OpenRouter and other compatible endpoints)
 - **VLM API Key**: For visual language model calls used by `doc_read` tool (default: OpenAI-compatible API, configurable in `configs/sandbox-server/doc_config.json`)
@@ -59,7 +59,7 @@ Seed file is located at `seeds/doc/seeds.jsonl`, one JSON object per line:
 {"content": "<?xml version='1.0' encoding='utf-8'?>\n<Outline><Section section_id=\"1\" start_page_num=\"1\" end_page_num=\"1.0\"><Paragraph page_num=\"1.0\" first_sentence=\"arXiv:2210.024442v1 [cs.CV] 5 Oct 2022\" /><Title page_num=\"1.0\">Making Your First Choice: To Address Cold Start Problem in Vision Active Learning</Title></Section> ... </Outline>", "kwargs": {"seed_path": "seeds/doc/seed/2210.02442v1"}}
 ```
 
-- `content` (required): The document outline in XML format, which is the preprocessed `outline.xml` file (see `./projects/docdancer/PDF_preprocess` for preprocessing details)
+- `content` (required): The document outline in XML format, which is the preprocessed `outline.xml` file (see `./projects/DocAgent/PDF_preprocess` for preprocessing details)
 - `kwargs` (required): A dictionary containing `seed_path`, which is the absolute path to the preprocessed document folder
 
 ---
@@ -68,7 +68,7 @@ Seed file is located at `seeds/doc/seeds.jsonl`, one JSON object per line:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                     AgentFlow DocDancer Pipeline                    │
+│                     AgentFlow DocAgent Pipeline                    │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
 │  Step 1: Sandbox Server                                             │
@@ -491,7 +491,7 @@ pipeline(config_path="configs/infer/doc_infer.json")
 
 For benchmarking, we strictly follow the official evaluation procedures of [MMLongDoc-Bench](https://github.com/mayubo2333/MMLongBench-Doc) and [DocBench](https://github.com/Anni-Zou/DocBench). All reported results are computed using their publicly available evaluation scripts to ensure fair and consistent comparison.
 
-For the LasJ metric used in MMLongDoc-Bench, please refer to the detailed evaluation prompt in [LasJ_prompt_for_MMLongDocBench.md](./projects/docdancer/eval/LasJ_prompt_for_MMLongDocBench.md) as outlined in the paper.
+For the LasJ metric used in MMLongDoc-Bench, please refer to the detailed evaluation prompt in [LasJ_prompt_for_MMLongDocBench.md](./projects/DocAgent/eval/LasJ_prompt_for_MMLongDocBench.md) as outlined in the paper.
 
 
 ---

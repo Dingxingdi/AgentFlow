@@ -194,7 +194,8 @@ class AgentRunner:
                 predicted_answer=final_answer,
                 ground_truth=task.answer,
                 trajectory=trajectory if self.config.save_trajectories else None,
-                success=True
+                success=True,
+                metadata=task.metadata
             )
             
         except Exception as e:
@@ -215,7 +216,8 @@ class AgentRunner:
                 ground_truth=task.answer,
                 trajectory=trajectory if self.config.save_trajectories else None,
                 success=False,
-                error=str(e)
+                error=str(e),
+                metadata=task.metadata
             )
 
     async def _run_conversation(

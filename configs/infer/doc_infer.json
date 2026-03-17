@@ -18,7 +18,11 @@
       "If you need more comprehensive, detailed, or accurate information from the document to fully address the user's query, you need to use the provided tool."
     ],
   
-    "evaluate_results": false,
+    "evaluate_results": true,
+    "evaluation_metric": "MMLongBench-Doc_LasJ", 
+    "evaluator_model_name": "openai/gpt-oss-120b",
+    "evaluator_api_key": "sk-",
+    "evaluator_base_url": "YOUR_BASE_URL",
   
     "data_path": "benchmark/doc_benchmark/Input/doc_benchmark.jsonl",
     "output_dir": "infer_results/doc",
