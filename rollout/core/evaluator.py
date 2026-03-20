@@ -420,18 +420,18 @@ Evaluation Form (score ONLY):
             """Load MMLongBench-Doc evaluation prompt from file"""
             current_file = Path(__file__).resolve()
             project_root = current_file.parents[2]  # Go up from rollout/core/ to project root
-            prompt_path = project_root / "projects" / "docdancer" / "eval" / "LasJ_prompt_for_MMLongDocBench.md"
+            prompt_path = project_root / "projects" / "DocDancer" / "eval" / "LasJ_prompt_for_MMLongDocBench.md"
             
             # Also try relative to current working directory
             if not prompt_path.exists():
-                prompt_path = Path("projects/docdancer/eval/LasJ_prompt_for_MMLongDocBench.md")
+                prompt_path = Path("projects/DocDancer/eval/LasJ_prompt_for_MMLongDocBench.md")
             
             # Try absolute path from workspace
             if not prompt_path.exists():
                 possible_paths = [
-                    Path("projects/docdancer/eval/LasJ_prompt_for_MMLongDocBench.md"),
-                    Path("../projects/docdancer/eval/LasJ_prompt_for_MMLongDocBench.md"),
-                    project_root / "projects" / "docdancer" / "eval" / "LasJ_prompt_for_MMLongDocBench.md",
+                    Path("projects/DocDancer/eval/LasJ_prompt_for_MMLongDocBench.md"),
+                    Path("../projects/DocDancer/eval/LasJ_prompt_for_MMLongDocBench.md"),
+                    project_root / "projects" / "DocDancer" / "eval" / "LasJ_prompt_for_MMLongDocBench.md",
                 ]
                 for path in possible_paths:
                     if path.exists():
@@ -441,7 +441,7 @@ Evaluation Form (score ONLY):
             if not prompt_path.exists():
                 raise FileNotFoundError(
                     f"MMLongBench-Doc prompt file not found. Tried: {prompt_path}\n"
-                    f"Please ensure the file exists at: projects/docdancer/eval/LasJ_prompt_for_MMLongDocBench.md"
+                    f"Please ensure the file exists at: projects/DocDancer/eval/LasJ_prompt_for_MMLongDocBench.md"
                 )
             
             with open(prompt_path, 'r', encoding='utf-8') as f:
@@ -505,10 +505,10 @@ Evaluation Form (score ONLY):
         """MMLongBench-Doc official F1-score metric"""
         # Dynamically import eval_score when needed
         def _load_eval_score():
-            """Load eval_score function from projects/docdancer/eval/eval_score.py"""
+            """Load eval_score function from projects/DocDancer/eval/eval_score.py"""
             current_file = Path(__file__).resolve()
             project_root = current_file.parents[2]  # Go up from rollout/core/ to project root
-            eval_score_path = project_root / "projects" / "docdancer" / "eval" / "eval_score.py"
+            eval_score_path = project_root / "projects" / "DocDancer" / "eval" / "eval_score.py"
             
             if not eval_score_path.exists():
                 return None
@@ -531,18 +531,18 @@ Evaluation Form (score ONLY):
             """Load answer extraction prompt from file"""
             current_file = Path(__file__).resolve()
             project_root = current_file.parents[2]  # Go up from rollout/core/ to project root
-            prompt_path = project_root / "projects" / "docdancer" / "eval" / "prompt_for_answer_extraction.md"
+            prompt_path = project_root / "projects" / "DocDancer" / "eval" / "prompt_for_answer_extraction.md"
             
             # Also try relative to current working directory
             if not prompt_path.exists():
-                prompt_path = Path("projects/docdancer/eval/prompt_for_answer_extraction.md")
+                prompt_path = Path("projects/DocDancer/eval/prompt_for_answer_extraction.md")
             
             # Try absolute path from workspace
             if not prompt_path.exists():
                 possible_paths = [
-                    Path("projects/docdancer/eval/prompt_for_answer_extraction.md"),
-                    Path("../projects/docdancer/eval/prompt_for_answer_extraction.md"),
-                    project_root / "projects" / "docdancer" / "eval" / "prompt_for_answer_extraction.md",
+                    Path("projects/DocDancer/eval/prompt_for_answer_extraction.md"),
+                    Path("../projects/DocDancer/eval/prompt_for_answer_extraction.md"),
+                    project_root / "projects" / "DocDancer" / "eval" / "prompt_for_answer_extraction.md",
                 ]
                 for path in possible_paths:
                     if path.exists():
@@ -552,7 +552,7 @@ Evaluation Form (score ONLY):
             if not prompt_path.exists():
                 raise FileNotFoundError(
                     f"Answer extraction prompt file not found. Tried: {prompt_path}\n"
-                    f"Please ensure the file exists at: projects/docdancer/eval/prompt_for_answer_extraction.md"
+                    f"Please ensure the file exists at: projects/DocDancer/eval/prompt_for_answer_extraction.md"
                 )
             
             with open(prompt_path, 'r', encoding='utf-8') as f:

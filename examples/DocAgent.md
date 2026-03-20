@@ -59,7 +59,7 @@ Seed file is located at `seeds/doc/seeds.jsonl`, one JSON object per line:
 {"content": "<?xml version='1.0' encoding='utf-8'?>\n<Outline><Section section_id=\"1\" start_page_num=\"1\" end_page_num=\"1.0\"><Paragraph page_num=\"1.0\" first_sentence=\"arXiv:2210.024442v1 [cs.CV] 5 Oct 2022\" /><Title page_num=\"1.0\">Making Your First Choice: To Address Cold Start Problem in Vision Active Learning</Title></Section> ... </Outline>", "kwargs": {"seed_path": "seeds/doc/seed/2210.02442v1"}}
 ```
 
-- `content` (required): The document outline in XML format, which is the preprocessed `outline.xml` file (see `./projects/DocAgent/PDF_preprocess` for preprocessing details)
+- `content` (required): The document outline in XML format, which is the preprocessed `outline.xml` file (see `./projects/DocDancer/PDF_preprocess` for preprocessing details)
 - `kwargs` (required): A dictionary containing `seed_path`, which is the absolute path to the preprocessed document folder
 
 ---
@@ -491,7 +491,7 @@ pipeline(config_path="configs/infer/doc_infer.json")
 
 For benchmarking, we strictly follow the official evaluation procedures of [MMLongDoc-Bench](https://github.com/mayubo2333/MMLongBench-Doc) and [DocBench](https://github.com/Anni-Zou/DocBench). All reported results are computed using their publicly available evaluation scripts to ensure fair and consistent comparison.
 
-For the LasJ metric used in MMLongDoc-Bench, please refer to the detailed evaluation prompt in [LasJ_prompt_for_MMLongDocBench.md](./projects/DocAgent/eval/LasJ_prompt_for_MMLongDocBench.md) as outlined in the paper.
+For the LasJ metric used in MMLongDoc-Bench, please refer to the detailed evaluation prompt in [LasJ_prompt_for_MMLongDocBench.md](./projects/DocDancer/eval/LasJ_prompt_for_MMLongDocBench.md) as outlined in the paper.
 
 
 ---
