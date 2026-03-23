@@ -98,9 +98,9 @@ class SerperClient:
             title = item.get(key_title, "")
             url = item.get(key_link, "")
             if img:
-                lines.append(f"Image: {img}, Title: {title}, Webpage Url: {url}")
+                lines.append(f"Image: {img}, Title: {title}, Webpage URL: {url}")
             elif title:
-                lines.append(f"Title: {title}, Webpage Url: {url}")
+                lines.append(f"Title: {title}, Webpage URL: {url}")
         if not lines:
             return ""
         return "```\n" + "\n\n".join(lines) + "\n```"
