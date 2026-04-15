@@ -10,16 +10,16 @@ if str(ROOT) not in sys.path:
 import pytest
 
 from sandbox.server.backends.error_codes import ErrorCode
-from sandbox.tests.mcp_real_cases import DOMAIN_SMOKE_CASES
-from sandbox.tests.mcp_real_env import (
-    build_real_mcp_server,
+from sandbox.tests.mcp_integration_cases import DOMAIN_SMOKE_CASES
+from sandbox.tests.mcp_integration_env import (
+    build_mcp_server,
     cleanup_worker,
     execute_tool,
-    require_real_mcp_enabled,
+    require_mcp_integration_enabled,
 )
 
 
-pytestmark = require_real_mcp_enabled()
+pytestmark = require_mcp_integration_enabled()
 
 
 EXPECTED_DOMAINS = (
@@ -66,7 +66,7 @@ def test_domain_case_registry_is_complete():
 @pytest.mark.parametrize("domain_name", EXPECTED_DOMAINS)
 async def test_domain_smoke(domain_name, tmp_path):
     case = DOMAIN_SMOKE_CASES[domain_name]
-    server = build_real_mcp_server(
+    server = build_mcp_server(
         enabled_mcp_servers=case["enabled_mcp_servers"],
         workspace_root=tmp_path / domain_name,
     )

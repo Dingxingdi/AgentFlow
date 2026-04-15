@@ -10,22 +10,22 @@ if str(ROOT) not in sys.path:
 import pytest
 
 from sandbox.server.backends.error_codes import ErrorCode
-from sandbox.tests.mcp_real_cases import (
+from sandbox.tests.mcp_integration_cases import (
     ALL_MCP_SERVERS,
     FILESYSTEM_TERMINAL_BOOTSTRAP_CASE,
     PARALLEL_SAFE_MCP_SERVERS,
     SERVER_SMOKE_CASES,
     SERIAL_ONLY_MCP_SERVERS,
 )
-from sandbox.tests.mcp_real_env import (
-    build_real_mcp_server,
+from sandbox.tests.mcp_integration_env import (
+    build_mcp_server,
     cleanup_worker,
     execute_tool,
-    require_real_mcp_enabled,
+    require_mcp_integration_enabled,
 )
 
 
-pytestmark = require_real_mcp_enabled()
+pytestmark = require_mcp_integration_enabled()
 
 
 def render_payload_text(result) -> str:
@@ -65,7 +65,7 @@ def smoke_context(*, server_name: str, workspace_root: Path) -> str:
 async def assert_single_server_smoke(server_name: str, tmp_path: Path) -> None:
     case = SERVER_SMOKE_CASES[server_name]
     workspace_root = tmp_path / server_name
-    server = build_real_mcp_server(
+    server = build_mcp_server(
         enabled_mcp_servers=[server_name],
         workspace_root=workspace_root,
     )
@@ -120,7 +120,7 @@ async def test_single_server_serial_smoke(server_name, tmp_path):
 
 @pytest.mark.anyio
 async def test_all_enabled_mcp_servers_startup_serial(tmp_path):
-    server = build_real_mcp_server(
+    server = build_mcp_server(
         enabled_mcp_servers=list(ALL_MCP_SERVERS),
         workspace_root=tmp_path / "all-enabled",
     )
@@ -135,7 +135,7 @@ async def test_all_enabled_mcp_servers_startup_serial(tmp_path):
 
 @pytest.mark.anyio
 async def test_filesystem_terminal_shared_session_smoke(tmp_path):
-    server = build_real_mcp_server(
+    server = build_mcp_server(
         enabled_mcp_servers=FILESYSTEM_TERMINAL_BOOTSTRAP_CASE["enabled_mcp_servers"],
         workspace_root=tmp_path / "workspaces",
     )

@@ -19,14 +19,14 @@ _REQUIRED_PG_VARS = (
     "AGENTFLOW_MCP_PGDATABASE",
 )
 
-_SERVICE_CLEANUP_ATTR = "_mcp_real_cleanup_callbacks"
+_SERVICE_CLEANUP_ATTR = "_mcp_integration_cleanup_callbacks"
 
 
-def require_real_mcp_enabled():
-    """Return a module-level pytest mark that skips unless AGENTFLOW_RUN_MCP_REAL=1."""
+def require_mcp_integration_enabled():
+    """Return a module-level pytest mark that skips unless AGENTFLOW_RUN_MCP_INTEGRATION=1."""
     return pytest.mark.skipif(
-        os.environ.get("AGENTFLOW_RUN_MCP_REAL") != "1",
-        reason="set AGENTFLOW_RUN_MCP_REAL=1 to run real MCP smoke tests",
+        os.environ.get("AGENTFLOW_RUN_MCP_INTEGRATION") != "1",
+        reason="set AGENTFLOW_RUN_MCP_INTEGRATION=1 to run MCP integration smoke tests",
     )
 
 
@@ -145,11 +145,11 @@ def _start_canvas_mock(toolathlon_root: Path) -> tuple[str, Any]:
 
 def require_controller_prereqs() -> None:
     """
-    Fail fast when a real run is explicitly enabled but controller prerequisites are missing.
+    Fail fast when integration tests are enabled but controller prerequisites are missing.
     """
-    if os.environ.get("AGENTFLOW_RUN_MCP_REAL") != "1":
+    if os.environ.get("AGENTFLOW_RUN_MCP_INTEGRATION") != "1":
         raise RuntimeError(
-            "Real MCP tests require AGENTFLOW_RUN_MCP_REAL=1 for explicit opt-in."
+            "MCP integration tests require AGENTFLOW_RUN_MCP_INTEGRATION=1 for explicit opt-in."
         )
 
     missing_pg = [name for name in _REQUIRED_PG_VARS if not os.environ.get(name)]
@@ -157,7 +157,7 @@ def require_controller_prereqs() -> None:
         raise RuntimeError(
             "Missing AGENTFLOW_MCP_PG* variables: "
             + ", ".join(sorted(missing_pg))
-            + ". Export all required AGENTFLOW_MCP_PG* variables before running real MCP tests."
+            + ". Export all required AGENTFLOW_MCP_PG* variables before running MCP integration tests."
         )
 
     toolathlon_root = discover_toolathlon_root()
@@ -183,7 +183,7 @@ def require_controller_prereqs() -> None:
         )
 
 
-def build_real_mcp_server(*, enabled_mcp_servers: list[str], workspace_root: Path):
+def build_mcp_server(*, enabled_mcp_servers: list[str], workspace_root: Path):
     require_controller_prereqs()
 
     workspace_root.mkdir(parents=True, exist_ok=True)
