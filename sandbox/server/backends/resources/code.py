@@ -66,9 +66,11 @@ class CodeBackend(Backend):
         del worker_id, session_info
         return None
 
-    def _get_claude_code_root(self) -> Path:
-        value = self.get_default_config().get("claude_code_root") or ""
-        return Path(value) if value else Path(".")
+    def _get_claude_code_root(self) -> Path | None:
+        value = self.get_default_config().get("claude_code_root")
+        if not isinstance(value, str) or not value.strip():
+            return None
+        return Path(value)
 
     def _get_workspace_root(self) -> Path:
         value = self.get_default_config().get("workspace_root") or "/tmp/agentflow_code"
@@ -98,7 +100,12 @@ class CodeBackend(Backend):
         value = config.get("source_dir")
         if not value:
             return None
-        return Path(value)
+        source_dir = Path(value)
+        if not source_dir.exists():
+            raise ValueError(f"source_dir does not exist: {source_dir}")
+        if not source_dir.is_dir():
+            raise ValueError(f"source_dir is not a directory: {source_dir}")
+        return source_dir
 
     def _copy_source_dir(self, source_dir: Path, workspace: Path) -> None:
         if not source_dir.exists():
@@ -115,6 +122,8 @@ class CodeBackend(Backend):
             return self._tool_instances
 
         root_path = self._get_claude_code_root()
+        if root_path is None:
+            raise ValueError("claude_code_root is not configured")
         root = str(root_path)
         inserted = False
         if root and root not in sys.path:
@@ -168,6 +177,10 @@ class CodeBackend(Backend):
         start_time = time.time()
         full_name = f"{self.name}:{tool_name}"
         session_id = (session_info or {}).get("session_id")
+        runtime_params = dict(params or {})
+        trace_id = runtime_params.pop("trace_id", None)
+        runtime_params.pop("worker_id", None)
+        runtime_params.pop("session_id", None)
 
         if tool_name == "bash" and not self.get_default_config().get("allow_bash", False):
             return build_error_response(
@@ -177,6 +190,7 @@ class CodeBackend(Backend):
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
                 session_id=session_id,
+                trace_id=trace_id,
             )
 
         tools = self._load_claude_code_tools()
@@ -189,6 +203,7 @@ class CodeBackend(Backend):
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
                 session_id=session_id,
+                trace_id=trace_id,
             )
 
         workspace = (
@@ -199,7 +214,7 @@ class CodeBackend(Backend):
         try:
             normalized_params = self._normalize_tool_params(
                 tool_name=tool_name,
-                params=params,
+                params=runtime_params,
                 workspace=Path(workspace),
             )
         except ValueError as exc:
@@ -210,6 +225,7 @@ class CodeBackend(Backend):
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
                 session_id=session_id,
+                trace_id=trace_id,
             )
         try:
             result = await tool.call(normalized_params, ctx)
@@ -221,6 +237,7 @@ class CodeBackend(Backend):
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
                 session_id=session_id,
+                trace_id=trace_id,
             )
 
         if isinstance(result, str) and result.startswith("Error:"):
@@ -231,6 +248,7 @@ class CodeBackend(Backend):
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
                 session_id=session_id,
+                trace_id=trace_id,
             )
 
         return build_success_response(
@@ -239,6 +257,7 @@ class CodeBackend(Backend):
             execution_time_ms=(time.time() - start_time) * 1000,
             resource_type=self.name,
             session_id=session_id,
+            trace_id=trace_id,
         )
 
     def _normalize_tool_params(

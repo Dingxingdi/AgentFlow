@@ -241,6 +241,42 @@ def test_tool_executor_code_dispatch_returns_standard_success_response(tmp_path)
     assert result["data"]["content"][0]["text"] == "hello from demo\n"
 
 
+def test_tool_executor_code_dispatch_preserves_trace_id(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+    runtime_workspace = tmp_path / "runtime-workspace"
+    runtime_workspace.mkdir(parents=True)
+    demo_file = runtime_workspace / "demo.py"
+    demo_file.write_text("hello from demo\n", encoding="utf-8")
+
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-trace",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            action="code:read",
+            params={"file_path": str(demo_file)},
+            worker_id="worker-1",
+            trace_id="trace-preserve-1",
+        )
+    )
+
+    assert result["code"] == ErrorCode.SUCCESS
+    assert result["meta"]["trace_id"] == "trace-preserve-1"
+
+
 def test_tool_executor_blocks_bash_when_allow_bash_false(tmp_path):
     module = load_code_backend_module()
     create_fake_claude_code_root(tmp_path)
@@ -461,3 +497,30 @@ def test_initialize_rejects_hostile_worker_id_without_deleting_outside_dir(tmp_p
         asyncio.run(backend.initialize("../escaped", {}))
 
     assert marker.exists()
+
+
+def test_initialize_fails_when_claude_code_root_not_configured(tmp_path):
+    module = load_code_backend_module()
+    config = BackendConfig(
+        enabled=True,
+        default_config={
+            "claude_code_root": "",
+            "workspace_root": str(tmp_path / "agentflow_code"),
+            "allow_bash": True,
+        },
+        description="Code backend",
+    )
+    backend = module.CodeBackend(config=config)
+
+    with pytest.raises(ValueError, match="claude_code_root"):
+        asyncio.run(backend.initialize("runner_123", {}))
+
+
+def test_initialize_rejects_nonexistent_source_dir(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    missing_source = tmp_path / "missing-source"
+
+    with pytest.raises(ValueError, match="source_dir"):
+        asyncio.run(backend.initialize("runner_123", {"source_dir": str(missing_source)}))
