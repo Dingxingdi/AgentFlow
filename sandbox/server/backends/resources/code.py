@@ -4,14 +4,20 @@ Code backend skeleton for lightweight coding workspace integration.
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import shutil
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from sandbox.server.backends.base import Backend, BackendConfig
+from sandbox.server.backends.error_codes import ErrorCode
+from sandbox.server.backends.response_builder import (
+    build_error_response,
+    build_success_response,
+)
 
 
 class CodeBackend(Backend):
@@ -93,15 +99,22 @@ class CodeBackend(Backend):
         if self._tool_instances is not None:
             return self._tool_instances
 
-        root = str(self._get_claude_code_root())
+        root_path = self._get_claude_code_root()
+        root = str(root_path)
         inserted = False
         if root and root not in sys.path:
             sys.path.insert(0, root)
             inserted = True
 
         try:
-            file_tools = importlib.import_module("tools.file_tools")
-            edit_tools = importlib.import_module("tools.edit_tools")
+            file_tools = self._load_module_from_path(
+                "_agentflow_code_file_tools",
+                root_path / "tools" / "file_tools.py",
+            )
+            edit_tools = self._load_module_from_path(
+                "_agentflow_code_edit_tools",
+                root_path / "tools" / "edit_tools.py",
+            )
             self._tool_instances = {
                 "read": file_tools.ReadTool(),
                 "glob": file_tools.GlobTool(),
@@ -114,6 +127,15 @@ class CodeBackend(Backend):
         finally:
             if inserted and root in sys.path:
                 sys.path.remove(root)
+
+    def _load_module_from_path(self, module_name: str, path: Path):
+        spec = importlib.util.spec_from_file_location(module_name, str(path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Unable to load module from {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
 
     def _make_bridge_tool(self, tool_name: str):
         async def bridge_tool(session_info: dict, **params):
@@ -128,12 +150,53 @@ class CodeBackend(Backend):
         session_info: dict,
         params: dict[str, Any],
     ) -> dict[str, Any]:
+        start_time = time.time()
+        full_name = f"{self.name}:{tool_name}"
+        session_id = (session_info or {}).get("session_id")
+
+        if tool_name == "bash" and not self.get_default_config().get("allow_bash", False):
+            return build_error_response(
+                code=ErrorCode.BUSINESS_FAILURE,
+                message="code:bash is disabled by backend config (allow_bash=False)",
+                tool=full_name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                resource_type=self.name,
+                session_id=session_id,
+            )
+
         tools = self._load_claude_code_tools()
-        tool = tools[tool_name]
+        tool = tools.get(tool_name)
+        if tool is None:
+            return build_error_response(
+                code=ErrorCode.INVALID_REQUEST_FORMAT,
+                message=f"Unknown code tool: {tool_name}",
+                tool=full_name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                resource_type=self.name,
+                session_id=session_id,
+            )
+
         workspace = (
             ((session_info or {}).get("data") or {}).get("workspace")
             or str(self._get_workspace_root())
         )
         ctx = SimpleNamespace(cwd=workspace)
-        result = await tool.call(params, ctx)
-        return {"content": [{"type": "text", "text": str(result)}]}
+        try:
+            result = await tool.call(params, ctx)
+        except Exception as exc:
+            return build_error_response(
+                code=ErrorCode.EXECUTION_ERROR,
+                message=str(exc),
+                tool=full_name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                resource_type=self.name,
+                session_id=session_id,
+            )
+
+        return build_success_response(
+            data=result,
+            tool=full_name,
+            execution_time_ms=(time.time() - start_time) * 1000,
+            resource_type=self.name,
+            session_id=session_id,
+        )
