@@ -7,7 +7,9 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import importlib.util
+import os
 import re
+import signal
 import shutil
 import sys
 import time
@@ -366,8 +368,11 @@ class CodeBackend(Backend):
                 workspace=workspace,
             )
         except ValueError as exc:
+            error_code = ErrorCode.BUSINESS_FAILURE
+            if tool_name == "bash":
+                error_code = ErrorCode.INVALID_INPUT
             return build_error_response(
-                code=ErrorCode.BUSINESS_FAILURE,
+                code=error_code,
                 message=str(exc),
                 tool=full_name,
                 execution_time_ms=(time.time() - start_time) * 1000,
@@ -382,7 +387,7 @@ class CodeBackend(Backend):
                 )
                 try:
                     result = await self._run_bash_command(
-                        command=str(normalized_params.get("command", "")),
+                        command=normalized_params["command"],
                         workspace=workspace,
                         timeout_seconds=bash_timeout_seconds,
                     )
@@ -440,6 +445,7 @@ class CodeBackend(Backend):
             cwd=str(workspace),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=True,
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -448,7 +454,10 @@ class CodeBackend(Backend):
             )
         except asyncio.TimeoutError:
             if proc.returncode is None:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             await proc.communicate()
             raise
 
@@ -506,5 +515,14 @@ class CodeBackend(Backend):
                 and re.search(r"(^|[\\/])\.\.([\\/]|$)", pattern)
             ):
                 raise ValueError("Glob pattern must not contain parent traversal segments")
+
+        if tool_name == "bash":
+            if "command" not in normalized:
+                raise ValueError("Parameter 'command' is required")
+            command = normalized.get("command")
+            if not isinstance(command, str):
+                raise ValueError("Parameter 'command' must be a string")
+            if not command.strip():
+                raise ValueError("Parameter 'command' must not be empty")
 
         return normalized

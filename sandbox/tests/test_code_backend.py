@@ -6,6 +6,7 @@ import asyncio
 import importlib.util
 import itertools
 import os
+import time
 import shlex
 import sys
 from pathlib import Path
@@ -507,6 +508,117 @@ def test_tool_executor_returns_timeout_error_when_bash_exceeds_limit(tmp_path):
 
     assert result["code"] == ErrorCode.TIMEOUT_ERROR
     assert "timeout" in result["message"].lower()
+
+
+def test_tool_executor_bash_timeout_returns_promptly_for_blocking_command(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    config = build_backend_config(tmp_path)
+    config.default_config["bash_timeout_seconds"] = 0.1
+    backend = module.CodeBackend(config=config)
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+
+    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
+    runtime_workspace.mkdir(parents=True)
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-bash-real-timeout",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    start = time.monotonic()
+    result = asyncio.run(
+        executor.execute(
+            action="code:bash",
+            params={
+                "command": (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "\"import time; time.sleep(5)\""
+                )
+            },
+            worker_id="worker-1",
+            trace_id="trace-bash-real-timeout",
+        )
+    )
+    elapsed = time.monotonic() - start
+
+    assert result["code"] == ErrorCode.TIMEOUT_ERROR
+    assert elapsed < 2.0
+
+
+def test_tool_executor_bash_rejects_missing_command(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+
+    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
+    runtime_workspace.mkdir(parents=True)
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-bash-missing-command",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            action="code:bash",
+            params={},
+            worker_id="worker-1",
+            trace_id="trace-bash-missing-command",
+        )
+    )
+
+    assert result["code"] == ErrorCode.INVALID_INPUT
+    assert "command" in result["message"].lower()
+
+
+def test_tool_executor_bash_rejects_non_string_command(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+
+    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
+    runtime_workspace.mkdir(parents=True)
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-bash-non-string-command",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            action="code:bash",
+            params={"command": 123},
+            worker_id="worker-1",
+            trace_id="trace-bash-non-string-command",
+        )
+    )
+
+    assert result["code"] == ErrorCode.INVALID_INPUT
+    assert "command" in result["message"].lower()
 
 
 def test_tool_executor_non_bash_timeout_uses_standard_error_handling(tmp_path):

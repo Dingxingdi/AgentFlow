@@ -2,12 +2,12 @@
   "server": {
     "url": "http://127.0.0.1:18890",
     "port": 18890,
-    "session_ttl": 600
+    "session_ttl": 300
   },
   "resources": {
     "code": {
       "enabled": true,
-      "description": "Code backend",
+      "description": "Lightweight coding backend powered by claude-code-py tools",
       "backend_class": "sandbox.server.backends.resources.code.CodeBackend",
       "config": {
         "claude_code_root": "${CLAUDE_CODE_ROOT:-/home/a1/sdb/dxd/claude-code-py}",
@@ -18,9 +18,7 @@
     }
   },
   "warmup": {
-    "enabled": true,
-    "resources": [
-      "code"
-    ]
+    "enabled": false,
+    "resources": []
   }
 }
