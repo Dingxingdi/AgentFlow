@@ -4,15 +4,15 @@ from sandbox.sandbox import Sandbox, SandboxConfig
 
 
 def test_load_server_config_expands_env_default_placeholders(tmp_path, monkeypatch):
-    monkeypatch.delenv("CLAUDE_CODE_ROOT", raising=False)
+    monkeypatch.delenv("TOOLATHLON_WORKSPACE_ROOT", raising=False)
 
-    config_path = tmp_path / "code_config.json"
+    config_path = tmp_path / "mcp_config.json"
     raw_config = {
         "resources": {
-            "code": {
+            "mcp": {
                 "enabled": True,
                 "config": {
-                    "claude_code_root": "${CLAUDE_CODE_ROOT:-/home/a1/sdb/dxd/claude-code-py}"
+                    "workspace_root": "${TOOLATHLON_WORKSPACE_ROOT:-/tmp/agentflow_mcp}"
                 },
             }
         }
@@ -24,6 +24,6 @@ def test_load_server_config_expands_env_default_placeholders(tmp_path, monkeypat
     loaded = sandbox._load_server_config()
 
     assert (
-        loaded["resources"]["code"]["config"]["claude_code_root"]
-        == "/home/a1/sdb/dxd/claude-code-py"
+        loaded["resources"]["mcp"]["config"]["workspace_root"]
+        == "/tmp/agentflow_mcp"
     )

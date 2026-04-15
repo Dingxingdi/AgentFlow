@@ -167,10 +167,10 @@ def require_controller_prereqs() -> None:
             f"{toolathlon_root}. Set TOOLATHLON_GYM_ROOT to a valid toolathlon_gym path."
         )
 
-    config_dir = toolathlon_root / "configs" / "mcp_servers"
-    if not config_dir.is_dir():
+    mcp_servers_dir = toolathlon_root / "mcp_servers"
+    if not mcp_servers_dir.is_dir():
         raise RuntimeError(
-            f"Toolathlon MCP config dir missing: {config_dir}. "
+            f"Toolathlon MCP servers dir missing: {mcp_servers_dir}. "
             "Ensure toolathlon_gym is present and initialized."
         )
 
@@ -205,7 +205,7 @@ def build_real_mcp_server(*, enabled_mcp_servers: list[str], workspace_root: Pat
                         "enabled": True,
                         "backend_class": "sandbox.server.backends.resources.mcp.MCPBackend",
                         "config": {
-                            "toolathlon_root": str(discover_toolathlon_root()),
+                            "mcp_servers_path": str(discover_toolathlon_root() / "mcp_servers"),
                             "enabled_mcp_servers": enabled_mcp_servers,
                             "workspace_root": str(workspace_root),
                             "env_overrides": env_overrides,
