@@ -9,6 +9,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 from sandbox.server.backends.base import BackendConfig
 from sandbox.server.backends.error_codes import ErrorCode
 from sandbox.server.core.tool_executor import ToolExecutor
@@ -373,3 +375,89 @@ def test_initialize_recreates_worker_workspace_without_stale_files(tmp_path):
     workspace = Path(second_session["workspace"])
     assert not (workspace / "stale.py").exists()
     assert (workspace / "fresh.py").exists()
+
+
+def test_code_read_rejects_absolute_path_outside_workspace(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+
+    runtime_workspace = tmp_path / "runtime-workspace"
+    runtime_workspace.mkdir(parents=True)
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("secret\n", encoding="utf-8")
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-5",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            action="code:read",
+            params={"file_path": str(outside_file)},
+            worker_id="worker-1",
+            trace_id="trace-1",
+        )
+    )
+
+    assert result["code"] != ErrorCode.SUCCESS
+
+
+def test_code_write_rejects_parent_escape_outside_workspace(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    fake_server = FakeServer()
+    backend.bind_server(fake_server)
+
+    runtime_workspace = tmp_path / "runtime-workspace"
+    runtime_workspace.mkdir(parents=True)
+    escaped_file = tmp_path / "escaped.txt"
+    executor = ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(
+            {
+                "session_id": "code-session-6",
+                "data": {"workspace": str(runtime_workspace)},
+            }
+        ),
+    )
+
+    result = asyncio.run(
+        executor.execute(
+            action="code:write",
+            params={"file_path": "../escaped.txt", "content": "escaped\n"},
+            worker_id="worker-1",
+            trace_id="trace-1",
+        )
+    )
+
+    assert result["code"] != ErrorCode.SUCCESS
+    assert not escaped_file.exists()
+
+
+def test_initialize_rejects_hostile_worker_id_without_deleting_outside_dir(tmp_path):
+    module = load_code_backend_module()
+    create_fake_claude_code_root(tmp_path)
+    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+
+    outside_dir = tmp_path / "escaped"
+    outside_dir.mkdir(parents=True)
+    marker = outside_dir / "keep.txt"
+    marker.write_text("do-not-delete\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        asyncio.run(backend.initialize("../escaped", {}))
+
+    assert marker.exists()

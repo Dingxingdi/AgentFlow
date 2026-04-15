@@ -5,6 +5,7 @@ Code backend skeleton for lightweight coding workspace integration.
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 import sys
 import time
@@ -74,11 +75,23 @@ class CodeBackend(Backend):
         return Path(value)
 
     def _prepare_workspace(self, worker_id: str) -> Path:
-        workspace = self._get_workspace_root() / worker_id
+        safe_worker_id = self._validate_worker_id(worker_id)
+        workspace = self._get_workspace_root() / safe_worker_id
         if workspace.exists():
             shutil.rmtree(workspace)
         workspace.mkdir(parents=True, exist_ok=True)
         return workspace
+
+    def _validate_worker_id(self, worker_id: str) -> str:
+        if not isinstance(worker_id, str) or not worker_id:
+            raise ValueError("worker_id must be a non-empty string")
+        if worker_id in {".", ".."}:
+            raise ValueError("worker_id contains unsafe path traversal")
+        if worker_id != Path(worker_id).name:
+            raise ValueError("worker_id must be a single safe path component")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", worker_id):
+            raise ValueError("worker_id contains unsupported characters")
+        return worker_id
 
     def _resolve_source_dir(self, config: dict | None) -> Path | None:
         config = config or {}
@@ -183,11 +196,21 @@ class CodeBackend(Backend):
             or str(self._get_workspace_root())
         )
         ctx = SimpleNamespace(cwd=workspace)
-        normalized_params = self._normalize_tool_params(
-            tool_name=tool_name,
-            params=params,
-            workspace=Path(workspace),
-        )
+        try:
+            normalized_params = self._normalize_tool_params(
+                tool_name=tool_name,
+                params=params,
+                workspace=Path(workspace),
+            )
+        except ValueError as exc:
+            return build_error_response(
+                code=ErrorCode.BUSINESS_FAILURE,
+                message=str(exc),
+                tool=full_name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                resource_type=self.name,
+                session_id=session_id,
+            )
         try:
             result = await tool.call(normalized_params, ctx)
         except Exception as exc:
@@ -225,6 +248,7 @@ class CodeBackend(Backend):
         workspace: Path,
     ) -> dict[str, Any]:
         normalized = dict(params)
+        workspace_path = workspace.resolve(strict=False)
 
         path_keys: tuple[str, ...] = ()
         if tool_name in {"read", "edit", "write"}:
@@ -238,7 +262,17 @@ class CodeBackend(Backend):
                 continue
             value_path = Path(raw_value)
             if value_path.is_absolute():
-                continue
-            normalized[key] = str(workspace / value_path)
+                resolved = value_path.resolve(strict=False)
+            else:
+                resolved = (workspace_path / value_path).resolve(strict=False)
+
+            try:
+                resolved.relative_to(workspace_path)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Path parameter '{key}' must stay inside workspace"
+                ) from exc
+
+            normalized[key] = str(resolved)
 
         return normalized
