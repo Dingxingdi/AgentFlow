@@ -69,7 +69,6 @@ class CodeBackend(Backend):
         }
 
     async def cleanup(self, worker_id: str, session_info: dict) -> None:
-        del worker_id
         workspace_value = ((session_info or {}).get("data") or {}).get("workspace")
         if not isinstance(workspace_value, str) or not workspace_value.strip():
             return None
@@ -77,11 +76,14 @@ class CodeBackend(Backend):
         try:
             workspace = Path(workspace_value).resolve()
             workspace_root = self._get_workspace_root().resolve()
+            expected_workspace = (workspace_root / self._validate_worker_id(worker_id)).resolve(
+                strict=False
+            )
             workspace.relative_to(workspace_root)
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, TypeError):
             return None
 
-        if workspace == workspace_root:
+        if workspace != expected_workspace:
             return None
         if workspace.exists() and workspace.is_dir():
             shutil.rmtree(workspace)
@@ -200,7 +202,7 @@ class CodeBackend(Backend):
         session_id = (session_info or {}).get("session_id")
         runtime_params = dict(params or {})
         trace_id = runtime_params.pop("trace_id", None)
-        runtime_params.pop("worker_id", None)
+        worker_id = runtime_params.pop("worker_id", None)
         runtime_params.pop("session_id", None)
 
         if tool_name == "bash" and not self.get_default_config().get("allow_bash", False):
@@ -242,11 +244,25 @@ class CodeBackend(Backend):
         try:
             workspace = Path(workspace_value).resolve(strict=False)
             workspace_root = self._get_workspace_root().resolve()
+            expected_workspace = (workspace_root / self._validate_worker_id(worker_id)).resolve(
+                strict=False
+            )
             workspace.relative_to(workspace_root)
-        except (OSError, RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError, TypeError):
             return build_error_response(
                 code=ErrorCode.BUSINESS_FAILURE,
                 message="Invalid session workspace: must resolve inside workspace_root",
+                tool=full_name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                resource_type=self.name,
+                session_id=session_id,
+                trace_id=trace_id,
+            )
+
+        if workspace != expected_workspace or not workspace.exists() or not workspace.is_dir():
+            return build_error_response(
+                code=ErrorCode.BUSINESS_FAILURE,
+                message="Invalid session workspace: must match existing worker workspace",
                 tool=full_name,
                 execution_time_ms=(time.time() - start_time) * 1000,
                 resource_type=self.name,
