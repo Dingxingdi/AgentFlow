@@ -6,6 +6,7 @@ import asyncio
 import importlib.util
 import itertools
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -464,7 +465,7 @@ def test_tool_executor_runs_bash_in_session_workspace_when_enabled(tmp_path):
     )
 
     assert result["code"] == ErrorCode.SUCCESS
-    assert result["data"] == str(runtime_workspace.resolve(strict=False))
+    assert result["data"].strip() == str(runtime_workspace.resolve(strict=False))
 
 
 def test_tool_executor_returns_timeout_error_when_bash_exceeds_limit(tmp_path):
@@ -493,7 +494,12 @@ def test_tool_executor_returns_timeout_error_when_bash_exceeds_limit(tmp_path):
     result = asyncio.run(
         executor.execute(
             action="code:bash",
-            params={"command": "sleep 0.2"},
+            params={
+                "command": (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "\"import time; time.sleep(2)\""
+                )
+            },
             worker_id="worker-1",
             trace_id="trace-bash-timeout",
         )
@@ -1162,3 +1168,4 @@ def test_code_config_template_parses():
         config.resources["code"].backend_class
         == "sandbox.server.backends.resources.code.CodeBackend"
     )
+    assert config.resources["code"].config["bash_timeout_seconds"] == 30

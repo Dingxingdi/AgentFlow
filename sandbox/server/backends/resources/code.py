@@ -302,18 +302,20 @@ class CodeBackend(Backend):
                 trace_id=trace_id,
             )
 
-        tools = self._load_claude_code_tools()
-        tool = tools.get(tool_name)
-        if tool is None:
-            return build_error_response(
-                code=ErrorCode.INVALID_REQUEST_FORMAT,
-                message=f"Unknown code tool: {tool_name}",
-                tool=full_name,
-                execution_time_ms=(time.time() - start_time) * 1000,
-                resource_type=self.name,
-                session_id=session_id,
-                trace_id=trace_id,
-            )
+        tool = None
+        if tool_name != "bash":
+            tools = self._load_claude_code_tools()
+            tool = tools.get(tool_name)
+            if tool is None:
+                return build_error_response(
+                    code=ErrorCode.INVALID_REQUEST_FORMAT,
+                    message=f"Unknown code tool: {tool_name}",
+                    tool=full_name,
+                    execution_time_ms=(time.time() - start_time) * 1000,
+                    resource_type=self.name,
+                    session_id=session_id,
+                    trace_id=trace_id,
+                )
 
         workspace_value = ((session_info or {}).get("data") or {}).get("workspace")
         if not isinstance(workspace_value, str) or not workspace_value.strip():
@@ -379,9 +381,10 @@ class CodeBackend(Backend):
                     self.get_default_config().get("bash_timeout_seconds", 30)
                 )
                 try:
-                    result = await asyncio.wait_for(
-                        tool.call(normalized_params, ctx),
-                        timeout=bash_timeout_seconds,
+                    result = await self._run_bash_command(
+                        command=str(normalized_params.get("command", "")),
+                        workspace=workspace,
+                        timeout_seconds=bash_timeout_seconds,
                     )
                 except asyncio.TimeoutError:
                     return build_error_response(
@@ -425,6 +428,41 @@ class CodeBackend(Backend):
             session_id=session_id,
             trace_id=trace_id,
         )
+
+    async def _run_bash_command(
+        self,
+        command: str,
+        workspace: Path,
+        timeout_seconds: float,
+    ) -> str:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(workspace),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            raise
+
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+
+        output = stdout_text.rstrip()
+        if stderr_text.strip():
+            stderr_section = stderr_text.rstrip()
+            output = f"{output}\n\n[stderr]\n{stderr_section}" if output else f"[stderr]\n{stderr_section}"
+
+        if not output.strip():
+            return "(no output)"
+        return output
 
     def _normalize_tool_params(
         self,
