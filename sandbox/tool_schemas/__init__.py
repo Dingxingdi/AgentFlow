@@ -13,10 +13,16 @@ from .vm_tools import get_vm_tool_schemas
 from .doc_tools import get_doc_tool_schemas
 from .ds_tools import get_ds_tool_schemas
 from .sql_tools import get_sql_tool_schemas
+from .mcp import get_mcp_tool_schemas
 
 
 def _tool_name_aliases(name: str) -> set[str]:
     """Return equivalent tool-name variants across '-', '_' and ':' separators."""
+    if name.startswith("mcp:"):
+        # MCP tool names already include a literal server/tool separator (`.`),
+        # so rewriting hyphens inside server names would over-broaden allowlists.
+        return {name}
+
     aliases = {name}
     if ":" in name:
         prefix, suffix = name.split(":", 1)
@@ -53,6 +59,20 @@ def get_tool_schemas(allowed_tools: Optional[List[str]] = None) -> List[Dict[str
         + get_sql_tool_schemas()
     )
 
+    # MCP manifest (438 tools) is expensive to load into every prompt.
+    # Only include when the caller explicitly requests them via
+    # allowed_tools (e.g. "mcp:*") or when no filter is given.
+    _needs_mcp = False
+    if not allowed_tools:
+        _needs_mcp = True
+    else:
+        for tool in allowed_tools:
+            lower = tool.lower()
+            if lower.startswith("mcp:") or lower.startswith("mcp.") or lower.startswith("mcp_") or lower.startswith("mcp-"):
+                _needs_mcp = True
+    if _needs_mcp:
+        all_schemas += get_mcp_tool_schemas()
+
     if not allowed_tools:
         return all_schemas
 
@@ -61,7 +81,7 @@ def get_tool_schemas(allowed_tools: Optional[List[str]] = None) -> List[Dict[str
     wildcard_prefixes = set()
 
     for tool in allowed_tools:
-        if tool.endswith(":*") or tool.endswith("_*") or tool.endswith("-*"):
+        if tool.endswith(":*") or tool.endswith("_*") or tool.endswith("-*") or tool.endswith(".*"):
             # Wildcard pattern like "vm:*" or "vm_*"
             prefix = tool[:-1]  # Remove the "*"
             wildcard_prefixes.update(_tool_name_aliases(prefix))
@@ -98,7 +118,7 @@ def get_tools_by_resource(resource_type: str) -> List[Dict[str, Any]]:
     Get tools for a specific resource type.
 
     Args:
-        resource_type: Resource type like "vm", "rag", "web", "bash", "code"
+        resource_type: Resource type like "vm", "rag", "web", "mcp"
 
     Returns:
         List of tool schemas for that resource
@@ -124,4 +144,5 @@ __all__ = [
     "get_doc_tool_schemas",
     "get_ds_tool_schemas",
     "get_sql_tool_schemas",
+    "get_mcp_tool_schemas",
 ]

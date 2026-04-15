@@ -276,11 +276,18 @@ class ToolExecutor:
                     if key in sig.parameters or has_var_keyword:
                         params[key] = value
 
-            inject_if_missing("worker_id", worker_id)
-            inject_if_missing("trace_id", trace_id)
-            
+            # MCP bridge tools receive all runtime context via session_info
+            # and handle parameter extraction internally in _dispatch().
+            # Injecting worker_id / trace_id / session_id into params would
+            # pollute the MCP tool arguments forwarded to the remote server.
+            if resource_type != "mcp":
+                inject_if_missing("worker_id", worker_id)
+                inject_if_missing("trace_id", trace_id)
+
+                if session_info:
+                    inject_if_missing("session_id", session_info.get("session_id"))
+
             if session_info:
-                inject_if_missing("session_id", session_info.get("session_id"))
                 inject_if_missing("session_info", session_info)
             
             # Execute tool function.
@@ -477,4 +484,3 @@ class ToolExecutor:
             data=data,
             execution_time_ms=execution_time_ms
         )
-
