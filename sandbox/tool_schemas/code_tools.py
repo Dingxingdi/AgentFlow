@@ -12,7 +12,7 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
     return [
         {
             "name": "code-read",
-            "description": "Read file content from the coding workspace by file path.",
+            "description": "Read a text file from the current code workspace and return contents with line numbers.",
             "parameters": [
                 {
                     "name": "file_path",
@@ -23,7 +23,7 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
                 {
                     "name": "offset",
                     "type": "integer",
-                    "description": "Optional starting line offset for partial reads.",
+                    "description": "Optional start line number for partial reads (1-indexed).",
                     "required": False,
                 },
                 {
@@ -54,12 +54,12 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "code-grep",
-            "description": "Search file contents in the coding workspace with a text pattern.",
+            "description": "Search file contents in the coding workspace with a regex pattern.",
             "parameters": [
                 {
                     "name": "pattern",
                     "type": "string",
-                    "description": "Text or regex pattern to search for.",
+                    "description": "Regex pattern to search for.",
                     "required": True,
                 },
                 {
@@ -78,7 +78,7 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "code-bash",
-            "description": "Run a shell command in the coding workspace.",
+            "description": "Run a shell command in the coding workspace (availability depends on backend config).",
             "parameters": [
                 {
                     "name": "command",
@@ -90,7 +90,7 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "code-edit",
-            "description": "Edit a file by replacing text content in the coding workspace.",
+            "description": "Edit a file in the coding workspace by exact string replacement, expecting a unique match unless replace_all=true.",
             "parameters": [
                 {
                     "name": "file_path",
@@ -101,19 +101,19 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
                 {
                     "name": "old_string",
                     "type": "string",
-                    "description": "The text to find in the file.",
+                    "description": "Exact text to find in the file.",
                     "required": True,
                 },
                 {
                     "name": "new_string",
                     "type": "string",
-                    "description": "Replacement text.",
+                    "description": "Text used to replace the matched string.",
                     "required": True,
                 },
                 {
                     "name": "replace_all",
                     "type": "boolean",
-                    "description": "Whether to replace all matches instead of just one.",
+                    "description": "When true, replace all exact matches; otherwise exactly one unique match is expected.",
                     "required": False,
                 },
             ],
