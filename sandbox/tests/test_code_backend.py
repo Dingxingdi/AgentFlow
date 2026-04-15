@@ -845,6 +845,32 @@ def test_initialize_unconfigured_claude_root_leaves_no_workspace(tmp_path):
     assert not workspace.exists()
 
 
+def test_initialize_unconfigured_claude_root_preserves_existing_workspace(tmp_path):
+    module = load_code_backend_module()
+    workspace_root = tmp_path / "agentflow_code"
+    workspace = workspace_root / "runner_123"
+    workspace.mkdir(parents=True)
+    marker = workspace / "keep.txt"
+    marker.write_text("preserve-me\n", encoding="utf-8")
+
+    config = BackendConfig(
+        enabled=True,
+        default_config={
+            "claude_code_root": "",
+            "workspace_root": str(workspace_root),
+            "allow_bash": True,
+        },
+        description="Code backend",
+    )
+    backend = module.CodeBackend(config=config)
+
+    with pytest.raises(ValueError, match="claude_code_root"):
+        asyncio.run(backend.initialize("runner_123", {}))
+
+    assert marker.exists()
+    assert marker.read_text(encoding="utf-8") == "preserve-me\n"
+
+
 def test_cleanup_removes_worker_workspace(tmp_path):
     module = load_code_backend_module()
     create_fake_claude_code_root(tmp_path)

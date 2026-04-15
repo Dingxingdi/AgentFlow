@@ -10,6 +10,7 @@ import re
 import shutil
 import sys
 import time
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -53,16 +54,20 @@ class CodeBackend(Backend):
 
     async def initialize(self, worker_id: str, config: dict) -> dict:
         source_dir = self._resolve_source_dir(config)
-        workspace = self._prepare_workspace(worker_id)
+        self._validate_claude_code_root_prerequisites()
+        workspace, staged_workspace, previous_workspace = self._prepare_workspace(worker_id)
 
         try:
             if source_dir:
-                self._copy_source_dir(source_dir, workspace)
+                self._copy_source_dir(source_dir, staged_workspace)
 
             self._load_claude_code_tools()
+            self._commit_prepared_workspace(workspace, staged_workspace, previous_workspace)
         except Exception:
-            if workspace.exists():
-                shutil.rmtree(workspace)
+            if staged_workspace.exists():
+                shutil.rmtree(staged_workspace)
+            if previous_workspace is not None and previous_workspace.exists() and not workspace.exists():
+                previous_workspace.rename(workspace)
             raise
 
         return {
@@ -101,13 +106,31 @@ class CodeBackend(Backend):
         value = self.get_default_config().get("workspace_root") or "/tmp/agentflow_code"
         return Path(value)
 
-    def _prepare_workspace(self, worker_id: str) -> Path:
+    def _prepare_workspace(self, worker_id: str) -> tuple[Path, Path, Path | None]:
         safe_worker_id = self._validate_worker_id(worker_id)
-        workspace = self._get_workspace_root() / safe_worker_id
-        if workspace.exists():
-            shutil.rmtree(workspace)
-        workspace.mkdir(parents=True, exist_ok=True)
-        return workspace
+        workspace_root = self._get_workspace_root()
+        workspace_root.mkdir(parents=True, exist_ok=True)
+        workspace = workspace_root / safe_worker_id
+        staged_workspace = workspace_root / f".{safe_worker_id}.staged-{uuid.uuid4().hex}"
+        previous_workspace = (
+            workspace_root / f".{safe_worker_id}.previous-{uuid.uuid4().hex}"
+            if workspace.exists()
+            else None
+        )
+        staged_workspace.mkdir(parents=True, exist_ok=False)
+        return workspace, staged_workspace, previous_workspace
+
+    def _commit_prepared_workspace(
+        self,
+        workspace: Path,
+        staged_workspace: Path,
+        previous_workspace: Path | None,
+    ) -> None:
+        if previous_workspace is not None:
+            workspace.rename(previous_workspace)
+        staged_workspace.rename(workspace)
+        if previous_workspace is not None and previous_workspace.exists():
+            shutil.rmtree(previous_workspace)
 
     def _validate_worker_id(self, worker_id: str) -> str:
         if not isinstance(worker_id, str) or not worker_id:
@@ -175,6 +198,20 @@ class CodeBackend(Backend):
             "write": edit_tools.WriteTool(),
         }
         return self._tool_instances
+
+    def _validate_claude_code_root_prerequisites(self) -> None:
+        root_path = self._get_claude_code_root()
+        if root_path is None:
+            raise ValueError("claude_code_root is not configured")
+
+        required_paths = (
+            root_path / "tool.py",
+            root_path / "tools" / "file_tools.py",
+            root_path / "tools" / "edit_tools.py",
+        )
+        for required_path in required_paths:
+            if not required_path.exists():
+                raise ValueError(f"claude_code_root is missing required file: {required_path}")
 
     def _load_root_support_modules(self, root_path: Path) -> dict[str, Any]:
         support_modules: dict[str, Any] = {}
