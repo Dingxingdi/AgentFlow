@@ -189,6 +189,19 @@ def test_grep_tool_searches_recursively_without_glob_filter(tmp_path):
     }
 
 
+def test_grep_tool_returns_no_matches_for_exit_code_one(tmp_path):
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    result = call_tool(
+        GrepTool(),
+        {"pattern": "missing", "path": str(tmp_path)},
+        make_ctx(tmp_path),
+    )
+
+    assert result == "(no matches)"
+
+
 def test_grep_tool_returns_error_prefix_for_invalid_pattern(tmp_path):
     target = tmp_path / "sample.txt"
     target.write_text("alpha\nbeta\n", encoding="utf-8")

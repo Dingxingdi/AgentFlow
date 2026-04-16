@@ -244,6 +244,72 @@ def test_tool_executor_runs_bash_via_vendored_tool(tmp_path):
     assert result["data"] == str(runtime_workspace.resolve(strict=False))
 
 
+def test_tool_executor_returns_business_failure_for_vendored_grep_error(tmp_path):
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
+    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
+    runtime_workspace.mkdir(parents=True)
+    sample_file = runtime_workspace / "sample.txt"
+    sample_file.write_text("alpha\nbeta\n", encoding="utf-8")
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-grep-error",
+            "data": {"workspace": str(runtime_workspace)},
+        },
+    )
+
+    result = execute_tool(
+        executor,
+        "code:grep",
+        params={"pattern": "[", "path": str(runtime_workspace)},
+        worker_id="worker-1",
+        trace_id="trace-grep-error",
+    )
+
+    assert result["code"] == ErrorCode.BUSINESS_FAILURE
+    assert result["message"].startswith("Error:")
+    assert "exit status 2" in result["message"]
+    assert "[stderr]:" in result["message"]
+
+
+def test_tool_executor_returns_business_failure_for_vendored_bash_error(tmp_path):
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
+    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
+    runtime_workspace.mkdir(parents=True)
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-bash-error",
+            "data": {"workspace": str(runtime_workspace)},
+        },
+    )
+
+    result = execute_tool(
+        executor,
+        "code:bash",
+        params={
+            "command": (
+                f"{sys.executable} -c "
+                "\"import sys; "
+                "print('out'); "
+                "print('err', file=sys.stderr); "
+                "raise SystemExit(7)\""
+            )
+        },
+        worker_id="worker-1",
+        trace_id="trace-bash-error",
+    )
+
+    assert result["code"] == ErrorCode.BUSINESS_FAILURE
+    assert result["message"].startswith("Error:")
+    assert "exit status 7" in result["message"]
+    assert "out" in result["message"]
+    assert "[stderr]:" in result["message"]
+    assert "err" in result["message"]
+
+
 def test_tool_executor_non_bash_timeout_uses_standard_error_handling(tmp_path):
     _, backend = build_backend(tmp_path)
     fake_server = bind_backend_tools(backend)
