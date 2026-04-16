@@ -3,7 +3,7 @@ Tests for the MCP backend skeleton and bridge-tool registration.
 """
 
 import asyncio
-import importlib.util
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -14,32 +14,19 @@ from sandbox.server.backends.base import BackendConfig
 from sandbox.server.config_loader import ConfigLoader
 from sandbox.server.core.tool_executor import ToolExecutor
 
-MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "server"
-    / "backends"
-    / "resources"
-    / "mcp.py"
-)
+MODULE_PATH = Path(__file__).resolve().parents[1] / "server" / "backends" / "resources" / "mcp.py"
+
+
+def remove_resources_modules():
+    package_name = "sandbox.server.backends.resources"
+    for module_name in list(sys.modules):
+        if module_name == package_name or module_name.startswith(f"{package_name}."):
+            sys.modules.pop(module_name, None)
 
 
 def load_mcp_backend_module():
-    package_name = "sandbox.server.backends.resources"
-    if package_name not in sys.modules:
-        package = types.ModuleType(package_name)
-        package.__path__ = [str(MODULE_PATH.parent)]
-        sys.modules[package_name] = package
-
-    spec = importlib.util.spec_from_file_location(
-        f"{package_name}.mcp",
-        MODULE_PATH,
-    )
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None
-    assert spec.loader is not None
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    remove_resources_modules()
+    return importlib.import_module("sandbox.server.backends.resources.mcp")
 
 
 class FakeServer:
@@ -75,6 +62,16 @@ def test_bind_server_registers_manifest_tools(tmp_path):
     assert "mcp:filesystem.list_directory" in fake_server._tools
     assert "mcp:terminal.run_command" in fake_server._tools
     assert fake_server._tool_resource_types["mcp:filesystem.list_directory"] == "mcp"
+
+
+def test_resources_package_exports_mcp_backend():
+    remove_resources_modules()
+
+    resources = importlib.import_module("sandbox.server.backends.resources")
+    mcp_module = importlib.import_module("sandbox.server.backends.resources.mcp")
+
+    assert resources.MCPBackend is mcp_module.MCPBackend
+    assert Path(resources.__file__).resolve() == (MODULE_PATH.parent / "__init__.py").resolve()
 
 
 def test_initialize_creates_worker_workspace(tmp_path, monkeypatch):
