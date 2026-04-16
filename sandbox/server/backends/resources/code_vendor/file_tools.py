@@ -49,9 +49,9 @@ class BashTool(Tool):
 
         output = _decode_text_mode_output(stdout_bytes)
         stderr = _decode_text_mode_output(stderr_bytes)
-        if stderr:
-            output += f"\n[stderr]:\n{stderr}"
-        return output.strip() or "(no output)"
+        if proc.returncode:
+            return _format_command_error("bash", proc.returncode, output, stderr)
+        return _format_command_output(output, stderr)
 
 
 def _decode_text_mode_output(data: bytes | None) -> str:
@@ -67,6 +67,26 @@ def _decode_text_mode_output(data: bytes | None) -> str:
         return text_stream.read()
     finally:
         text_stream.detach()
+
+
+def _format_command_output(stdout: str, stderr: str) -> str:
+    output = stdout
+    if stderr:
+        output += f"\n[stderr]:\n{stderr}" if output else f"[stderr]:\n{stderr}"
+    return output.strip() or "(no output)"
+
+
+def _format_command_error(tool_name: str, returncode: int, stdout: str, stderr: str) -> str:
+    if returncode < 0:
+        status = f"signal {-returncode}"
+    else:
+        status = f"exit status {returncode}"
+
+    summary = f"Error: {tool_name} command failed with {status}"
+    details = _format_command_output(stdout, stderr)
+    if details == "(no output)":
+        return summary
+    return f"{summary}\n{details}"
 
 
 class ReadTool(Tool):
@@ -149,12 +169,16 @@ class GrepTool(Tool):
 
     async def call(self, args: dict[str, Any], ctx: Any) -> str:
         base = Path(args.get("path", ctx.cwd))
-        cmd = ["grep", "-r", "-n", args["pattern"]]
+        cmd = ["grep", "-r", "-n"]
         if "glob" in args:
             cmd += ["--include", args["glob"]]
-        cmd.append(str(base))
+        cmd += ["--", args["pattern"], str(base)]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.stdout or "(no matches)"
+        if result.returncode == 0:
+            return result.stdout or "(no matches)"
+        if result.returncode == 1:
+            return "(no matches)"
+        return _format_command_error("grep", result.returncode, result.stdout, result.stderr)
 
     def is_read_only(self, args: dict[str, Any]) -> bool:
         del args

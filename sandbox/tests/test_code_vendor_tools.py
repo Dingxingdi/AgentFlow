@@ -189,6 +189,34 @@ def test_grep_tool_searches_recursively_without_glob_filter(tmp_path):
     }
 
 
+def test_grep_tool_returns_error_prefix_for_invalid_pattern(tmp_path):
+    target = tmp_path / "sample.txt"
+    target.write_text("alpha\nbeta\n", encoding="utf-8")
+
+    result = call_tool(
+        GrepTool(),
+        {"pattern": "[", "path": str(tmp_path)},
+        make_ctx(tmp_path),
+    )
+
+    assert result.startswith("Error:")
+    assert "exit status 2" in result
+    assert "[stderr]:" in result
+
+
+def test_grep_tool_treats_option_like_pattern_as_search_pattern(tmp_path):
+    target = tmp_path / "sample.txt"
+    target.write_text("--help\nalpha\n", encoding="utf-8")
+
+    result = call_tool(
+        GrepTool(),
+        {"pattern": "--help", "path": str(tmp_path)},
+        make_ctx(tmp_path),
+    )
+
+    assert result == f"{target}:1:--help\n"
+
+
 def test_bash_tool_combines_stdout_and_stderr(tmp_path):
     result = call_tool(
         BashTool(),
@@ -218,6 +246,28 @@ def test_bash_tool_matches_text_mode_newline_normalization(tmp_path):
     )
 
     assert result == "a\nb"
+
+
+def test_bash_tool_returns_error_prefix_for_nonzero_exit_status(tmp_path):
+    result = call_tool(
+        BashTool(),
+        {
+            "command": (
+                f"{shlex.quote(sys.executable)} -c "
+                "\"import sys; "
+                "print('out'); "
+                "print('err', file=sys.stderr); "
+                "raise SystemExit(7)\""
+            )
+        },
+        make_ctx(tmp_path),
+    )
+
+    assert result.startswith("Error:")
+    assert "exit status 7" in result
+    assert "out" in result
+    assert "[stderr]:" in result
+    assert "err" in result
 
 
 def test_bash_tool_cancellation_stops_background_command(tmp_path):
