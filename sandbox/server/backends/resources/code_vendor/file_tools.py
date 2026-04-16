@@ -1,0 +1,139 @@
+from __future__ import annotations
+
+import glob
+import re
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from .tool import Tool
+
+
+class BashTool(Tool):
+    name = "Bash"
+    description = "Execute a shell command and return stdout/stderr."
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to run"},
+            },
+            "required": ["command"],
+        }
+
+    async def call(self, args: dict[str, Any], ctx: Any) -> str:
+        result = subprocess.run(
+            args["command"],
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=ctx.cwd,
+        )
+        output = result.stdout.rstrip("\n")
+        stderr = result.stderr.rstrip("\n")
+        if stderr:
+            output = f"{output}\n[stderr]:\n{stderr}" if output else f"[stderr]:\n{stderr}"
+        return output or "(no output)"
+
+
+class ReadTool(Tool):
+    name = "Read"
+    description = "Read a file and return its contents with line numbers."
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "offset": {"type": "integer", "description": "Number of lines to skip"},
+                "limit": {"type": "integer", "description": "Maximum lines to return"},
+            },
+            "required": ["file_path"],
+        }
+
+    async def call(self, args: dict[str, Any], ctx: Any) -> str:
+        del ctx
+        path = Path(args["file_path"])
+        if not path.exists():
+            return f"Error: file not found: {path}"
+
+        lines = path.read_text(encoding="utf-8").splitlines()
+        offset = max(args.get("offset", 0), 0)
+        limit = args.get("limit", 2000)
+        selected = lines[offset : offset + limit]
+        return "\n".join(
+            f"{line_number}: {line}"
+            for line_number, line in enumerate(selected, start=offset + 1)
+        )
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        del args
+        return True
+
+
+class GlobTool(Tool):
+    name = "Glob"
+    description = "Find files matching a glob pattern."
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern"},
+                "path": {"type": "string", "description": "Directory to search from"},
+            },
+            "required": ["pattern"],
+        }
+
+    async def call(self, args: dict[str, Any], ctx: Any) -> str:
+        base = Path(args.get("path", ctx.cwd))
+        pattern = args["pattern"]
+        matches = sorted(glob.glob(pattern, root_dir=base, recursive=True))
+        resolved = [str((base / match).resolve(strict=False)) for match in matches]
+        return "\n".join(resolved) or "(no matches)"
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        del args
+        return True
+
+
+class GrepTool(Tool):
+    name = "Grep"
+    description = "Search file contents with a regex pattern."
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Regex pattern"},
+                "path": {"type": "string", "description": "Directory to search"},
+                "glob": {"type": "string", "description": "Optional file glob filter"},
+            },
+            "required": ["pattern"],
+        }
+
+    async def call(self, args: dict[str, Any], ctx: Any) -> str:
+        base = Path(args.get("path", ctx.cwd))
+        pattern = re.compile(args["pattern"])
+        file_glob = args.get("glob")
+
+        if file_glob:
+            paths = sorted(path for path in base.rglob(file_glob) if path.is_file())
+        else:
+            paths = sorted(path for path in base.rglob("*") if path.is_file())
+
+        matches: list[str] = []
+        for path in paths:
+            for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+                if pattern.search(line):
+                    matches.append(f"{path}:{line_number}:{line}")
+        return "\n".join(matches) or "(no matches)"
+
+    def is_read_only(self, args: dict[str, Any]) -> bool:
+        del args
+        return True
