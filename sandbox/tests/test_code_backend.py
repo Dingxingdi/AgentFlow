@@ -3,12 +3,10 @@ Tests for the Code backend skeleton and bridge-tool registration.
 """
 
 import asyncio
-import importlib.util
-import itertools
+import importlib
 import os
 import sys
 from pathlib import Path
-import types
 
 import pytest
 
@@ -17,49 +15,7 @@ from sandbox.server.backends.error_codes import ErrorCode
 from sandbox.server.config_loader import ConfigLoader
 from sandbox.server.core.tool_executor import ToolExecutor
 
-MODULE_PATH = (
-    Path(__file__).resolve().parents[1]
-    / "server"
-    / "backends"
-    / "resources"
-    / "code.py"
-)
-VENDOR_PACKAGE_DIR = MODULE_PATH.parent / "code_vendor"
-
-
-def install_resources_package_stub():
-    package_name = "sandbox.server.backends.resources"
-    if package_name not in sys.modules:
-        package = types.ModuleType(package_name)
-        package.__path__ = [str(MODULE_PATH.parent)]
-        sys.modules[package_name] = package
-
-    vendor_package_name = f"{package_name}.code_vendor"
-    if vendor_package_name not in sys.modules:
-        package_spec = importlib.util.spec_from_file_location(
-            vendor_package_name,
-            VENDOR_PACKAGE_DIR / "__init__.py",
-            submodule_search_locations=[str(VENDOR_PACKAGE_DIR)],
-        )
-        package = importlib.util.module_from_spec(package_spec)
-        assert package_spec is not None
-        assert package_spec.loader is not None
-        sys.modules[vendor_package_name] = package
-        package_spec.loader.exec_module(package)
-
-    for module_name in ("tool", "file_tools", "edit_tools"):
-        full_name = f"{vendor_package_name}.{module_name}"
-        if full_name in sys.modules:
-            continue
-        module_spec = importlib.util.spec_from_file_location(
-            full_name,
-            VENDOR_PACKAGE_DIR / f"{module_name}.py",
-        )
-        module = importlib.util.module_from_spec(module_spec)
-        assert module_spec is not None
-        assert module_spec.loader is not None
-        sys.modules[full_name] = module
-        module_spec.loader.exec_module(module)
+MODULE_PATH = Path(__file__).resolve().parents[1] / "server" / "backends" / "resources" / "code.py"
 
 
 def remove_resources_modules():
@@ -70,18 +26,8 @@ def remove_resources_modules():
 
 
 def load_code_backend_module():
-    install_resources_package_stub()
-    unique_id = next(_MODULE_LOAD_COUNTER)
-    module_name = f"_test_code_backend_{unique_id}"
-    spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
-    module = importlib.util.module_from_spec(spec)
-    assert spec is not None
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-_MODULE_LOAD_COUNTER = itertools.count()
+    remove_resources_modules()
+    return importlib.import_module("sandbox.server.backends.resources.code")
 
 
 class FakeServer:
@@ -166,6 +112,18 @@ def test_bind_server_registers_code_tools(tmp_path):
     assert "code:bash" in fake_server._tools
     assert fake_server._tool_resource_types["code:read"] == "code"
     assert fake_server._tool_resource_types["code:bash"] == "code"
+
+
+def test_resources_package_exports_eager_backends_without_lazy_machinery():
+    remove_resources_modules()
+
+    resources = importlib.import_module("sandbox.server.backends.resources")
+    code_module = importlib.import_module("sandbox.server.backends.resources.code")
+    mcp_module = importlib.import_module("sandbox.server.backends.resources.mcp")
+
+    assert resources.CodeBackend is code_module.CodeBackend
+    assert resources.MCPBackend is mcp_module.MCPBackend
+    assert not hasattr(resources, "__getattr__")
 
 
 def test_initialize_does_not_require_external_root(tmp_path):
