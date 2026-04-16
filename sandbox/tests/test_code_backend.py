@@ -6,10 +6,9 @@ import asyncio
 import importlib.util
 import itertools
 import os
-import time
-import shlex
 import sys
 from pathlib import Path
+import types
 
 import pytest
 
@@ -25,15 +24,49 @@ MODULE_PATH = (
     / "resources"
     / "code.py"
 )
+VENDOR_PACKAGE_DIR = MODULE_PATH.parent / "code_vendor"
+
+
+def install_resources_package_stub():
+    package_name = "sandbox.server.backends.resources"
+    if package_name not in sys.modules:
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(MODULE_PATH.parent)]
+        sys.modules[package_name] = package
+
+    vendor_package_name = f"{package_name}.code_vendor"
+    if vendor_package_name not in sys.modules:
+        package_spec = importlib.util.spec_from_file_location(
+            vendor_package_name,
+            VENDOR_PACKAGE_DIR / "__init__.py",
+            submodule_search_locations=[str(VENDOR_PACKAGE_DIR)],
+        )
+        package = importlib.util.module_from_spec(package_spec)
+        assert package_spec is not None
+        assert package_spec.loader is not None
+        sys.modules[vendor_package_name] = package
+        package_spec.loader.exec_module(package)
+
+    for module_name in ("tool", "file_tools", "edit_tools"):
+        full_name = f"{vendor_package_name}.{module_name}"
+        if full_name in sys.modules:
+            continue
+        module_spec = importlib.util.spec_from_file_location(
+            full_name,
+            VENDOR_PACKAGE_DIR / f"{module_name}.py",
+        )
+        module = importlib.util.module_from_spec(module_spec)
+        assert module_spec is not None
+        assert module_spec.loader is not None
+        sys.modules[full_name] = module
+        module_spec.loader.exec_module(module)
 
 
 def load_code_backend_module():
+    install_resources_package_stub()
     unique_id = next(_MODULE_LOAD_COUNTER)
     module_name = f"_test_code_backend_{unique_id}"
-    spec = importlib.util.spec_from_file_location(
-        module_name,
-        MODULE_PATH,
-    )
+    spec = importlib.util.spec_from_file_location(module_name, MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec is not None
     assert spec.loader is not None
@@ -53,162 +86,6 @@ class FakeServer:
         self._tools[name] = func
         if resource_type is not None:
             self._tool_resource_types[name] = resource_type
-
-
-def build_backend_config(tmp_path):
-    return BackendConfig(
-        enabled=True,
-        default_config={
-            "claude_code_root": str(tmp_path / "claude-code-py"),
-            "workspace_root": str(tmp_path / "agentflow_code"),
-            "allow_bash": True,
-            "bash_timeout_seconds": 30,
-        },
-        description="Code backend",
-    )
-
-
-def create_fake_claude_code_root(tmp_path):
-    root = tmp_path / "claude-code-py"
-    tools_dir = root / "tools"
-    tools_dir.mkdir(parents=True, exist_ok=True)
-
-    (root / "log.py").write_text(
-        "ROOT_LOG_MARKER = 'log-helper'\n",
-        encoding="utf-8",
-    )
-
-    (root / "trace.py").write_text(
-        "ROOT_TRACE_MARKER = 'trace-helper'\n",
-        encoding="utf-8",
-    )
-
-    (root / "tool.py").write_text(
-        "from log import ROOT_LOG_MARKER\n"
-        "from trace import ROOT_TRACE_MARKER\n"
-        "\n"
-        "class Tool:\n"
-        "    ROOT_LOG_MARKER = ROOT_LOG_MARKER\n"
-        "    ROOT_TRACE_MARKER = ROOT_TRACE_MARKER\n"
-        "\n"
-        "    async def call(self, params, ctx):\n"
-        "        raise NotImplementedError\n",
-        encoding="utf-8",
-    )
-
-    (tools_dir / "__init__.py").write_text(
-        "raise RuntimeError('tools package import should not happen')\n",
-        encoding="utf-8",
-    )
-
-    (tools_dir / "file_tools.py").write_text(
-        "from tool import Tool\n"
-        "import asyncio\n"
-        "from pathlib import Path\n"
-        "import glob\n"
-        "\n"
-        "class ReadTool(Tool):\n"
-        "    def __init__(self):\n"
-        "        self.loaded_log_marker = self.ROOT_LOG_MARKER\n"
-        "        self.loaded_trace_marker = self.ROOT_TRACE_MARKER\n"
-        "\n"
-        "    async def call(self, params, ctx):\n"
-        "        file_path = Path(params['file_path'])\n"
-        "        if not file_path.exists():\n"
-        "            return f'Error: File not found: {file_path}'\n"
-        "        return file_path.read_text(encoding='utf-8')\n"
-        "\n"
-        "class GlobTool(Tool):\n"
-        "    async def call(self, params, ctx):\n"
-        "        base = Path(params.get('path', '.'))\n"
-        "        pattern = params.get('pattern', '*')\n"
-        "        matches = sorted(glob.glob(pattern, root_dir=str(base), recursive=True))\n"
-        "        return [str((base / match).resolve(strict=False)) for match in matches]\n"
-        "\n"
-        "class GrepTool(Tool):\n"
-        "    async def call(self, params, ctx):\n"
-        "        return f\"Found 0 matches in {Path(params.get('path', '.'))}\"\n"
-        "\n"
-        "class BashTool(Tool):\n"
-        "    async def call(self, params, ctx):\n"
-        "        command = params.get('command', '')\n"
-        "        if command == 'pwd':\n"
-        "            return ctx.cwd\n"
-        "        if command.startswith('sleep '):\n"
-        "            await asyncio.sleep(float(command.split(' ', 1)[1]))\n"
-        "            return 'slept'\n"
-        "        return f\"ran: {command}\"\n",
-        encoding="utf-8",
-    )
-
-    (tools_dir / "edit_tools.py").write_text(
-        "from tool import Tool\n"
-        "from pathlib import Path\n"
-        "\n"
-        "class EditTool(Tool):\n"
-        "    async def call(self, params, ctx):\n"
-        "        file_path = Path(params['file_path'])\n"
-        "        if not file_path.exists():\n"
-        "            return f'Error: File does not exist: {file_path}'\n"
-        "        text = file_path.read_text(encoding='utf-8')\n"
-        "        text = text.replace(params.get('old_string', ''), params.get('new_string', ''))\n"
-        "        file_path.write_text(text, encoding='utf-8')\n"
-        "        return f\"Updated {file_path}\"\n"
-        "\n"
-        "class WriteTool(Tool):\n"
-        "    async def call(self, params, ctx):\n"
-        "        file_path = Path(params['file_path'])\n"
-        "        file_path.parent.mkdir(parents=True, exist_ok=True)\n"
-        "        file_path.write_text(params.get('content', ''), encoding='utf-8')\n"
-        "        return f\"Wrote {file_path}\"\n",
-        encoding="utf-8",
-    )
-    return root
-
-
-def create_marker_claude_code_root(tmp_path, root_name: str, marker: str):
-    root = tmp_path / root_name
-    tools_dir = root / "tools"
-    tools_dir.mkdir(parents=True, exist_ok=True)
-
-    (root / "tool.py").write_text(
-        f"class Tool:\n"
-        f"    ROOT_MARKER = {marker!r}\n"
-        "    async def call(self, params, ctx):\n"
-        "        return self.ROOT_MARKER\n",
-        encoding="utf-8",
-    )
-
-    (tools_dir / "file_tools.py").write_text(
-        "from tool import Tool\n"
-        "\n"
-        "class ReadTool(Tool):\n"
-        "    def __init__(self):\n"
-        "        self.loaded_marker = self.ROOT_MARKER\n"
-        "\n"
-        "class GlobTool(Tool):\n"
-        "    pass\n"
-        "\n"
-        "class GrepTool(Tool):\n"
-        "    pass\n"
-        "\n"
-        "class BashTool(Tool):\n"
-        "    pass\n",
-        encoding="utf-8",
-    )
-
-    (tools_dir / "edit_tools.py").write_text(
-        "from tool import Tool\n"
-        "\n"
-        "class EditTool(Tool):\n"
-        "    pass\n"
-        "\n"
-        "class WriteTool(Tool):\n"
-        "    pass\n",
-        encoding="utf-8",
-    )
-
-    return root
 
 
 class FakeResourceRouter:
@@ -232,12 +109,51 @@ class FakeResourceRouter:
         return True
 
 
-def test_bind_server_registers_code_tools(tmp_path):
+def build_backend_config(tmp_path):
+    return BackendConfig(
+        enabled=True,
+        default_config={
+            "workspace_root": str(tmp_path / "agentflow_code"),
+        },
+        description="Code backend",
+    )
+
+
+def build_backend(tmp_path):
     module = load_code_backend_module()
     backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
+    return module, backend
 
+
+def bind_backend_tools(backend):
+    fake_server = FakeServer()
     backend.bind_server(fake_server)
+    return fake_server
+
+
+def build_executor(fake_server, session_info):
+    return ToolExecutor(
+        tools=fake_server._tools,
+        tool_name_index={},
+        tool_resource_types=fake_server._tool_resource_types,
+        resource_router=FakeResourceRouter(session_info),
+    )
+
+
+def execute_tool(executor, action, *, params, worker_id, trace_id):
+    return asyncio.run(
+        executor.execute(
+            action=action,
+            params=params,
+            worker_id=worker_id,
+            trace_id=trace_id,
+        )
+    )
+
+
+def test_bind_server_registers_code_tools(tmp_path):
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
 
     assert "code:read" in fake_server._tools
     assert "code:bash" in fake_server._tools
@@ -245,10 +161,8 @@ def test_bind_server_registers_code_tools(tmp_path):
     assert fake_server._tool_resource_types["code:bash"] == "code"
 
 
-def test_initialize_creates_worker_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+def test_initialize_does_not_require_external_root(tmp_path):
+    _, backend = build_backend(tmp_path)
 
     session = asyncio.run(backend.initialize("runner_123", {}))
 
@@ -257,9 +171,7 @@ def test_initialize_creates_worker_workspace(tmp_path):
 
 
 def test_initialize_copies_source_dir(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     source_dir = tmp_path / "source"
     source_dir.mkdir(parents=True)
     (source_dir / "demo.py").write_text("print('hi')\n", encoding="utf-8")
@@ -273,431 +185,131 @@ def test_initialize_copies_source_dir(tmp_path):
     assert copied.read_text(encoding="utf-8") == "print('hi')\n"
 
 
-def test_load_claude_code_tools_uses_direct_file_loading(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+def test_load_code_tools_uses_internal_vendor_package(tmp_path):
+    _, backend = build_backend(tmp_path)
 
-    tools = backend._load_claude_code_tools()
+    tools = backend._load_code_tools()
 
     assert set(tools.keys()) == {"read", "glob", "grep", "bash", "edit", "write"}
-
-
-def test_load_claude_code_tools_supports_root_local_tool_dependencies(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-
-    tools = backend._load_claude_code_tools()
-
-    assert tools["read"].loaded_log_marker == "log-helper"
-    assert tools["read"].loaded_trace_marker == "trace-helper"
-
-
-def test_load_code_backend_module_does_not_install_resources_package_in_sys_modules():
-    package_name = "sandbox.server.backends.resources"
-    previous = sys.modules.pop(package_name, None)
-
-    try:
-        module = load_code_backend_module()
-        assert hasattr(module, "CodeBackend")
-        assert package_name not in sys.modules
-    finally:
-        if previous is not None:
-            sys.modules[package_name] = previous
-
-
-def test_load_claude_code_tools_is_isolated_per_backend_root(tmp_path):
-    module = load_code_backend_module()
-    root_a = create_marker_claude_code_root(tmp_path, "claude-code-a", "root-a")
-    root_b = create_marker_claude_code_root(tmp_path, "claude-code-b", "root-b")
-
-    config_a = build_backend_config(tmp_path)
-    config_a.default_config["claude_code_root"] = str(root_a)
-    backend_a = module.CodeBackend(config=config_a)
-
-    config_b = build_backend_config(tmp_path)
-    config_b.default_config["claude_code_root"] = str(root_b)
-    backend_b = module.CodeBackend(config=config_b)
-
-    tools_a = backend_a._load_claude_code_tools()
-    tools_b = backend_b._load_claude_code_tools()
-
-    assert tools_a["read"].loaded_marker == "root-a"
-    assert tools_b["read"].loaded_marker == "root-b"
+    assert type(tools["read"]).__module__ == (
+        "sandbox.server.backends.resources.code_vendor.file_tools"
+    )
+    assert type(tools["edit"]).__module__ == (
+        "sandbox.server.backends.resources.code_vendor.edit_tools"
+    )
+    assert backend._load_code_tools() is tools
 
 
 def test_tool_executor_code_dispatch_returns_standard_success_response(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     demo_file = runtime_workspace / "demo.py"
     demo_file.write_text("hello from demo\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-1",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-1",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(demo_file)},
-            worker_id="worker-1",
-            trace_id="trace-1",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(demo_file)},
+        worker_id="worker-1",
+        trace_id="trace-1",
     )
 
     assert result["code"] == ErrorCode.SUCCESS
-    assert result["data"] == "hello from demo\n"
+    assert result["data"] == "   1→hello from demo"
 
 
 def test_tool_executor_code_dispatch_preserves_trace_id(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     demo_file = runtime_workspace / "demo.py"
     demo_file.write_text("hello from demo\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-trace",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-trace",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(demo_file)},
-            worker_id="worker-1",
-            trace_id="trace-preserve-1",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(demo_file)},
+        worker_id="worker-1",
+        trace_id="trace-preserve-1",
     )
 
     assert result["code"] == ErrorCode.SUCCESS
     assert result["meta"]["trace_id"] == "trace-preserve-1"
 
 
-def test_tool_executor_blocks_bash_when_allow_bash_false(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    config = build_backend_config(tmp_path)
-    config.default_config["allow_bash"] = False
-    backend = module.CodeBackend(config=config)
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-2",
-                "data": {
-                    "workspace": str(tmp_path / "agentflow_code" / "runtime-workspace")
-                },
-            }
-        ),
-    )
-
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={"command": "echo hi"},
-            worker_id="worker-1",
-            trace_id="trace-1",
-        )
-    )
-
-    assert result["code"] == ErrorCode.BUSINESS_FAILURE
-    assert "disabled" in result["message"].lower()
-
-
-def test_tool_executor_runs_bash_in_session_workspace_when_enabled(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+def test_tool_executor_runs_bash_via_vendored_tool(tmp_path):
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-enabled",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-bash",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={"command": "pwd"},
-            worker_id="worker-1",
-            trace_id="trace-bash-enabled",
-        )
+    result = execute_tool(
+        executor,
+        "code:bash",
+        params={"command": "pwd"},
+        worker_id="worker-1",
+        trace_id="trace-bash",
     )
 
     assert result["code"] == ErrorCode.SUCCESS
-    assert result["data"].strip() == str(runtime_workspace.resolve(strict=False))
-
-
-def test_tool_executor_bash_success_formats_stdout_and_stderr_like_upstream(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
-    runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-format",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
-    )
-
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={
-                "command": (
-                    f"{shlex.quote(sys.executable)} -c "
-                    "\"import sys; print('stdout-line'); print('stderr-line', file=sys.stderr)\""
-                )
-            },
-            worker_id="worker-1",
-            trace_id="trace-bash-format",
-        )
-    )
-
-    assert result["code"] == ErrorCode.SUCCESS
-    assert result["data"] == "stdout-line\n\n[stderr]:\nstderr-line"
-
-
-def test_tool_executor_returns_timeout_error_when_bash_exceeds_limit(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    config = build_backend_config(tmp_path)
-    config.default_config["bash_timeout_seconds"] = 0.01
-    backend = module.CodeBackend(config=config)
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
-    runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-timeout",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
-    )
-
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={
-                "command": (
-                    f"{shlex.quote(sys.executable)} -c "
-                    "\"import time; time.sleep(2)\""
-                )
-            },
-            worker_id="worker-1",
-            trace_id="trace-bash-timeout",
-        )
-    )
-
-    assert result["code"] == ErrorCode.TIMEOUT_ERROR
-    assert "timeout" in result["message"].lower()
-
-
-def test_tool_executor_bash_timeout_returns_promptly_for_blocking_command(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    config = build_backend_config(tmp_path)
-    config.default_config["bash_timeout_seconds"] = 0.1
-    backend = module.CodeBackend(config=config)
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
-    runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-real-timeout",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
-    )
-
-    start = time.monotonic()
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={
-                "command": (
-                    f"{shlex.quote(sys.executable)} -c "
-                    "\"import time; time.sleep(5)\""
-                )
-            },
-            worker_id="worker-1",
-            trace_id="trace-bash-real-timeout",
-        )
-    )
-    elapsed = time.monotonic() - start
-
-    assert result["code"] == ErrorCode.TIMEOUT_ERROR
-    assert elapsed < 2.0
-
-
-def test_tool_executor_bash_rejects_missing_command(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
-    runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-missing-command",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
-    )
-
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={},
-            worker_id="worker-1",
-            trace_id="trace-bash-missing-command",
-        )
-    )
-
-    assert result["code"] == ErrorCode.INVALID_INPUT
-    assert "command" in result["message"].lower()
-
-
-def test_tool_executor_bash_rejects_non_string_command(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
-    runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-bash-non-string-command",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
-    )
-
-    result = asyncio.run(
-        executor.execute(
-            action="code:bash",
-            params={"command": 123},
-            worker_id="worker-1",
-            trace_id="trace-bash-non-string-command",
-        )
-    )
-
-    assert result["code"] == ErrorCode.INVALID_INPUT
-    assert "command" in result["message"].lower()
+    assert result["data"] == str(runtime_workspace.resolve(strict=False))
 
 
 def test_tool_executor_non_bash_timeout_uses_standard_error_handling(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
 
     class TimeoutReadTool:
         async def call(self, params, ctx):
             del params, ctx
             raise asyncio.TimeoutError("read timeout")
 
-    backend._load_claude_code_tools = lambda: {"read": TimeoutReadTool()}
+    tools = backend._load_code_tools()
+    backend._tool_instances = dict(tools)
+    backend._tool_instances["read"] = TimeoutReadTool()
 
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     demo_file = runtime_workspace / "demo.py"
     demo_file.write_text("hello from demo\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-read-timeout",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-read-timeout",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(demo_file)},
-            worker_id="worker-1",
-            trace_id="trace-read-timeout",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(demo_file)},
+        worker_id="worker-1",
+        trace_id="trace-read-timeout",
     )
 
     assert result["code"] == ErrorCode.EXECUTION_ERROR
@@ -705,12 +317,8 @@ def test_tool_executor_non_bash_timeout_uses_standard_error_handling(tmp_path):
 
 
 def test_code_write_relative_file_path_resolves_inside_session_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     process_cwd = tmp_path / "process-cwd"
@@ -718,25 +326,20 @@ def test_code_write_relative_file_path_resolves_inside_session_workspace(tmp_pat
     prev_cwd = Path.cwd()
     os.chdir(process_cwd)
     try:
-        executor = ToolExecutor(
-            tools=fake_server._tools,
-            tool_name_index={},
-            tool_resource_types=fake_server._tool_resource_types,
-            resource_router=FakeResourceRouter(
-                {
-                    "session_id": "code-session-3",
-                    "data": {"workspace": str(runtime_workspace)},
-                }
-            ),
+        executor = build_executor(
+            fake_server,
+            {
+                "session_id": "code-session-3",
+                "data": {"workspace": str(runtime_workspace)},
+            },
         )
 
-        result = asyncio.run(
-            executor.execute(
-                action="code:write",
-                params={"file_path": "nested/output.txt", "content": "from workspace\n"},
-                worker_id="worker-1",
-                trace_id="trace-1",
-            )
+        result = execute_tool(
+            executor,
+            "code:write",
+            params={"file_path": "nested/output.txt", "content": "from workspace\n"},
+            worker_id="worker-1",
+            trace_id="trace-1",
         )
     finally:
         os.chdir(prev_cwd)
@@ -749,33 +352,24 @@ def test_code_write_relative_file_path_resolves_inside_session_workspace(tmp_pat
 
 
 def test_code_read_error_prefix_is_returned_as_agentflow_error_response(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-4",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-4",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": "missing.txt"},
-            worker_id="worker-1",
-            trace_id="trace-1",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": "missing.txt"},
+        worker_id="worker-1",
+        trace_id="trace-1",
     )
 
     assert result["code"] != ErrorCode.SUCCESS
@@ -783,36 +377,26 @@ def test_code_read_error_prefix_is_returned_as_agentflow_error_response(tmp_path
 
 
 def test_tool_executor_rejects_missing_session_workspace_without_fallback(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     workspace_root = tmp_path / "agentflow_code"
     workspace_root.mkdir(parents=True, exist_ok=True)
     fallback_file = workspace_root / "fallback.txt"
     fallback_file.write_text("must-not-read\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-missing-workspace",
-                "data": {},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-missing-workspace",
+            "data": {},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": "fallback.txt"},
-            worker_id="worker-1",
-            trace_id="trace-missing-workspace",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": "fallback.txt"},
+        worker_id="worker-1",
+        trace_id="trace-missing-workspace",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -820,31 +404,22 @@ def test_tool_executor_rejects_missing_session_workspace_without_fallback(tmp_pa
 
 
 def test_tool_executor_rejects_malformed_session_workspace_without_fallback(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-malformed-workspace",
-                "data": {"workspace": 123},
-            }
-        ),
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-malformed-workspace",
+            "data": {"workspace": 123},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": "fallback.txt"},
-            worker_id="worker-1",
-            trace_id="trace-malformed-workspace",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": "fallback.txt"},
+        worker_id="worker-1",
+        trace_id="trace-malformed-workspace",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -852,33 +427,23 @@ def test_tool_executor_rejects_malformed_session_workspace_without_fallback(tmp_
 
 
 def test_tool_executor_rejects_nonexistent_session_workspace_under_workspace_root(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     nonexistent_workspace = tmp_path / "agentflow_code" / "worker-1"
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-nonexistent-workspace",
-                "data": {"workspace": str(nonexistent_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-nonexistent-workspace",
+            "data": {"workspace": str(nonexistent_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": "demo.py"},
-            worker_id="worker-1",
-            trace_id="trace-nonexistent-workspace",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": "demo.py"},
+        worker_id="worker-1",
+        trace_id="trace-nonexistent-workspace",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -886,36 +451,26 @@ def test_tool_executor_rejects_nonexistent_session_workspace_under_workspace_roo
 
 
 def test_tool_executor_rejects_mismatched_session_workspace_under_workspace_root(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     mismatched_workspace = tmp_path / "agentflow_code" / "other-worker"
     mismatched_workspace.mkdir(parents=True)
     demo_file = mismatched_workspace / "demo.py"
     demo_file.write_text("should-not-read\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-mismatched-workspace",
-                "data": {"workspace": str(mismatched_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-mismatched-workspace",
+            "data": {"workspace": str(mismatched_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(demo_file)},
-            worker_id="worker-1",
-            trace_id="trace-mismatched-workspace",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(demo_file)},
+        worker_id="worker-1",
+        trace_id="trace-mismatched-workspace",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -923,36 +478,26 @@ def test_tool_executor_rejects_mismatched_session_workspace_under_workspace_root
 
 
 def test_tool_executor_rejects_session_workspace_outside_workspace_root(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     outside_workspace = tmp_path / "outside-workspace"
     outside_workspace.mkdir(parents=True)
     demo_file = outside_workspace / "demo.py"
     demo_file.write_text("outside\n", encoding="utf-8")
-
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-outside-workspace",
-                "data": {"workspace": str(outside_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-outside-workspace",
+            "data": {"workspace": str(outside_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(demo_file)},
-            worker_id="worker-1",
-            trace_id="trace-outside-workspace",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(demo_file)},
+        worker_id="worker-1",
+        trace_id="trace-outside-workspace",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -960,9 +505,7 @@ def test_tool_executor_rejects_session_workspace_outside_workspace_root(tmp_path
 
 
 def test_initialize_recreates_worker_workspace_without_stale_files(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     first_source = tmp_path / "source-first"
     second_source = tmp_path / "source-second"
     first_source.mkdir(parents=True)
@@ -984,69 +527,51 @@ def test_initialize_recreates_worker_workspace_without_stale_files(tmp_path):
 
 
 def test_code_read_rejects_absolute_path_outside_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     outside_file = tmp_path / "outside.txt"
     outside_file.write_text("secret\n", encoding="utf-8")
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-5",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-5",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:read",
-            params={"file_path": str(outside_file)},
-            worker_id="worker-1",
-            trace_id="trace-1",
-        )
+    result = execute_tool(
+        executor,
+        "code:read",
+        params={"file_path": str(outside_file)},
+        worker_id="worker-1",
+        trace_id="trace-1",
     )
 
     assert result["code"] != ErrorCode.SUCCESS
 
 
 def test_code_write_rejects_parent_escape_outside_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     escaped_file = tmp_path / "escaped.txt"
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-6",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-6",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:write",
-            params={"file_path": "../escaped.txt", "content": "escaped\n"},
-            worker_id="worker-1",
-            trace_id="trace-1",
-        )
+    result = execute_tool(
+        executor,
+        "code:write",
+        params={"file_path": "../escaped.txt", "content": "escaped\n"},
+        worker_id="worker-1",
+        trace_id="trace-1",
     )
 
     assert result["code"] != ErrorCode.SUCCESS
@@ -1054,33 +579,24 @@ def test_code_write_rejects_parent_escape_outside_workspace(tmp_path):
 
 
 def test_code_glob_rejects_parent_traversal_pattern(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-glob-parent-traversal",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-glob-parent-traversal",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:glob",
-            params={"path": ".", "pattern": "../*"},
-            worker_id="worker-1",
-            trace_id="trace-glob-parent-traversal",
-        )
+    result = execute_tool(
+        executor,
+        "code:glob",
+        params={"path": ".", "pattern": "../*"},
+        worker_id="worker-1",
+        trace_id="trace-glob-parent-traversal",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -1088,35 +604,29 @@ def test_code_glob_rejects_parent_traversal_pattern(tmp_path):
 
 
 def test_code_glob_rejects_embedded_parent_traversal_pattern(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     (runtime_workspace / "nested").mkdir(parents=True)
-    (runtime_workspace / "nested" / "demo.py").write_text("print('safe')\n", encoding="utf-8")
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-glob-embedded-traversal",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    (runtime_workspace / "nested" / "demo.py").write_text(
+        "print('safe')\n",
+        encoding="utf-8",
+    )
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-glob-embedded-traversal",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:glob",
-            params={"path": ".", "pattern": "**/../*"},
-            worker_id="worker-1",
-            trace_id="trace-glob-embedded-traversal",
-        )
+    result = execute_tool(
+        executor,
+        "code:glob",
+        params={"path": ".", "pattern": "**/../*"},
+        worker_id="worker-1",
+        trace_id="trace-glob-embedded-traversal",
     )
 
     assert result["code"] == ErrorCode.BUSINESS_FAILURE
@@ -1124,47 +634,35 @@ def test_code_glob_rejects_embedded_parent_traversal_pattern(tmp_path):
 
 
 def test_code_glob_allows_safe_workspace_pattern(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-    fake_server = FakeServer()
-    backend.bind_server(fake_server)
-
+    _, backend = build_backend(tmp_path)
+    fake_server = bind_backend_tools(backend)
     runtime_workspace = tmp_path / "agentflow_code" / "worker-1"
     runtime_workspace.mkdir(parents=True)
     safe_file = runtime_workspace / "nested" / "demo.py"
     safe_file.parent.mkdir(parents=True)
     safe_file.write_text("print('ok')\n", encoding="utf-8")
-    executor = ToolExecutor(
-        tools=fake_server._tools,
-        tool_name_index={},
-        tool_resource_types=fake_server._tool_resource_types,
-        resource_router=FakeResourceRouter(
-            {
-                "session_id": "code-session-glob-safe",
-                "data": {"workspace": str(runtime_workspace)},
-            }
-        ),
+    executor = build_executor(
+        fake_server,
+        {
+            "session_id": "code-session-glob-safe",
+            "data": {"workspace": str(runtime_workspace)},
+        },
     )
 
-    result = asyncio.run(
-        executor.execute(
-            action="code:glob",
-            params={"path": ".", "pattern": "**/*.py"},
-            worker_id="worker-1",
-            trace_id="trace-glob-safe",
-        )
+    result = execute_tool(
+        executor,
+        "code:glob",
+        params={"path": ".", "pattern": "**/*.py"},
+        worker_id="worker-1",
+        trace_id="trace-glob-safe",
     )
 
     assert result["code"] == ErrorCode.SUCCESS
-    assert result["data"] == [str(safe_file.resolve(strict=False))]
+    assert result["data"] == str(safe_file.resolve(strict=False))
 
 
 def test_initialize_rejects_hostile_worker_id_without_deleting_outside_dir(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
-
+    _, backend = build_backend(tmp_path)
     outside_dir = tmp_path / "escaped"
     outside_dir.mkdir(parents=True)
     marker = outside_dir / "keep.txt"
@@ -1176,27 +674,8 @@ def test_initialize_rejects_hostile_worker_id_without_deleting_outside_dir(tmp_p
     assert marker.exists()
 
 
-def test_initialize_fails_when_claude_code_root_not_configured(tmp_path):
-    module = load_code_backend_module()
-    config = BackendConfig(
-        enabled=True,
-        default_config={
-            "claude_code_root": "",
-            "workspace_root": str(tmp_path / "agentflow_code"),
-            "allow_bash": True,
-        },
-        description="Code backend",
-    )
-    backend = module.CodeBackend(config=config)
-
-    with pytest.raises(ValueError, match="claude_code_root"):
-        asyncio.run(backend.initialize("runner_123", {}))
-
-
 def test_initialize_rejects_nonexistent_source_dir(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     missing_source = tmp_path / "missing-source"
 
     with pytest.raises(ValueError, match="source_dir"):
@@ -1204,9 +683,7 @@ def test_initialize_rejects_nonexistent_source_dir(tmp_path):
 
 
 def test_initialize_invalid_source_dir_leaves_no_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     missing_source = tmp_path / "missing-source"
     workspace = tmp_path / "agentflow_code" / "runner_123"
 
@@ -1216,56 +693,8 @@ def test_initialize_invalid_source_dir_leaves_no_workspace(tmp_path):
     assert not workspace.exists()
 
 
-def test_initialize_unconfigured_claude_root_leaves_no_workspace(tmp_path):
-    module = load_code_backend_module()
-    config = BackendConfig(
-        enabled=True,
-        default_config={
-            "claude_code_root": "",
-            "workspace_root": str(tmp_path / "agentflow_code"),
-            "allow_bash": True,
-        },
-        description="Code backend",
-    )
-    backend = module.CodeBackend(config=config)
-    workspace = tmp_path / "agentflow_code" / "runner_123"
-
-    with pytest.raises(ValueError, match="claude_code_root"):
-        asyncio.run(backend.initialize("runner_123", {}))
-
-    assert not workspace.exists()
-
-
-def test_initialize_unconfigured_claude_root_preserves_existing_workspace(tmp_path):
-    module = load_code_backend_module()
-    workspace_root = tmp_path / "agentflow_code"
-    workspace = workspace_root / "runner_123"
-    workspace.mkdir(parents=True)
-    marker = workspace / "keep.txt"
-    marker.write_text("preserve-me\n", encoding="utf-8")
-
-    config = BackendConfig(
-        enabled=True,
-        default_config={
-            "claude_code_root": "",
-            "workspace_root": str(workspace_root),
-            "allow_bash": True,
-        },
-        description="Code backend",
-    )
-    backend = module.CodeBackend(config=config)
-
-    with pytest.raises(ValueError, match="claude_code_root"):
-        asyncio.run(backend.initialize("runner_123", {}))
-
-    assert marker.exists()
-    assert marker.read_text(encoding="utf-8") == "preserve-me\n"
-
-
 def test_cleanup_removes_worker_workspace(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     session = asyncio.run(backend.initialize("runner_123", {}))
     workspace = Path(session["workspace"])
 
@@ -1276,9 +705,7 @@ def test_cleanup_removes_worker_workspace(tmp_path):
 
 
 def test_cleanup_does_not_delete_workspace_outside_root(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     outside_workspace = tmp_path / "outside-workspace"
     outside_workspace.mkdir(parents=True)
 
@@ -1290,9 +717,7 @@ def test_cleanup_does_not_delete_workspace_outside_root(tmp_path):
 
 
 def test_cleanup_does_not_delete_nested_under_root_non_worker_path(tmp_path):
-    module = load_code_backend_module()
-    create_fake_claude_code_root(tmp_path)
-    backend = module.CodeBackend(config=build_backend_config(tmp_path))
+    _, backend = build_backend(tmp_path)
     nested_workspace = tmp_path / "agentflow_code" / "shared" / "cache"
     nested_workspace.mkdir(parents=True)
 
@@ -1322,8 +747,8 @@ def test_code_config_template_parses():
     assert config.server.session_ttl == 300
     assert (
         config.resources["code"].description
-        == "Lightweight coding backend powered by claude-code-py tools"
+        == "Lightweight coding backend powered by vendored internal tools"
     )
-    assert config.resources["code"].config["bash_timeout_seconds"] == 30
+    assert config.resources["code"].config == {"workspace_root": "/tmp/agentflow_code"}
     assert config.warmup.enabled is False
     assert config.warmup.resources == []
