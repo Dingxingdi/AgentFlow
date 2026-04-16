@@ -1,77 +1,45 @@
 # sandbox/server/backends/resources/__init__.py
 """
-Stateful resource backend module.
+Stateful resource backend exports.
 
-Provides heavyweight backends (mock implementations) that require session
-management. These backends initialize resources, maintain state, and clean up
-when finished.
-
-Backend types:
-- VMBackend - VM interaction (stateful, uses initialize/cleanup)
-- RAGBackend - Document retrieval (shared resource, uses warmup/shutdown)
-
-Directory layout:
-```
-backends/
-├── resources/           # Stateful backends (heavyweight, require sessions)
-│   ├── __init__.py
-│   ├── vm.py
-│   └── rag.py
-│
-└── tools/               # Stateless tools (lightweight, no sessions)
-    ├── __init__.py
-    └── websearch.py
-```
-
-Usage example:
-```python
-from sandbox.server import HTTPServiceServer
-from sandbox.server.backends.resources import (
-    VMBackend, 
-    RAGBackend
-)
-
-server = HTTPServiceServer()
-
-# Load stateful backends.
-server.load_backend(VMBackend())
-server.load_backend(RAGBackend())
-
-server.run()
-```
-
-Config example:
-```json
-{
-  "resources": {
-    "vm": {
-      "enabled": true,
-      "backend_class": "sandbox.server.backends.resources.vm.VMBackend",
-      "config": {"screen_size": [1920, 1080]}
-    },
-    "rag": {
-      "enabled": true,
-      "backend_class": "sandbox.server.backends.resources.rag.RAGBackend",
-      "config": {"model_name": "e5-base", "index_type": "faiss"}
-    }
-  }
-}
-```
+Backends are loaded lazily so importing one backend module does not force
+unrelated heavyweight dependencies for the others.
 """
 
-from .vm import VMBackend, create_vm_backend
-from .rag import RAGBackend, create_rag_backend
-from .mcp import MCPBackend
-from .code import CodeBackend
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+_EXPORTS = {
+    "VMBackend": (".vm", "VMBackend"),
+    "create_vm_backend": (".vm", "create_vm_backend"),
+    "RAGBackend": (".rag", "RAGBackend"),
+    "create_rag_backend": (".rag", "create_rag_backend"),
+    "MCPBackend": (".mcp", "MCPBackend"),
+    "CodeBackend": (".code", "CodeBackend"),
+}
 
 __all__ = [
-    # Backend classes
     "VMBackend",
     "RAGBackend",
     "MCPBackend",
     "CodeBackend",
-    
-    # Convenience factories
     "create_vm_backend",
     "create_rag_backend",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _EXPORTS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attr_name = _EXPORTS[name]
+    module = importlib.import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

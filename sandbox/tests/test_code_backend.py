@@ -752,3 +752,40 @@ def test_code_config_template_parses():
     assert config.resources["code"].config == {"workspace_root": "/tmp/agentflow_code"}
     assert config.warmup.enabled is False
     assert config.warmup.resources == []
+
+
+def test_create_server_loads_code_backend_via_config_loader(tmp_path):
+    claude_code_root = create_fake_claude_code_root(tmp_path)
+    workspace_root = tmp_path / "agentflow_code"
+    loader = ConfigLoader()
+    loader.load_from_dict(
+        {
+            "server": {
+                "title": "Code backend smoke",
+                "session_ttl": 300,
+            },
+            "resources": {
+                "code": {
+                    "enabled": True,
+                    "description": "Code backend",
+                    "backend_class": "sandbox.server.backends.resources.code.CodeBackend",
+                    "config": {
+                        "claude_code_root": str(claude_code_root),
+                        "workspace_root": str(workspace_root),
+                        "allow_bash": True,
+                        "bash_timeout_seconds": 30,
+                    },
+                }
+            },
+            "warmup": {
+                "enabled": False,
+                "resources": [],
+            },
+        }
+    )
+
+    server = loader.create_server(host="127.0.0.1", port=0)
+
+    assert "code" in server._backends
+    assert "code:read" in server._tools
+    assert server._tool_resource_types["code:read"] == "code"
