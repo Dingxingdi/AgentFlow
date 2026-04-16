@@ -22,6 +22,8 @@ MODULE_PATH = (
     / "mcp"
     / "toolathlon_gym.py"
 )
+
+
 def load_mcp_backend_module():
     package_name = "sandbox.server.backends.resources"
     if package_name not in sys.modules:
@@ -29,6 +31,7 @@ def load_mcp_backend_module():
         package.__path__ = [str(MODULE_PATH.parent.parent)]
         sys.modules[package_name] = package
 
+    # Register the mcp sub-package so ``from .client import ...`` resolves.
     mcp_package_name = f"{package_name}.mcp"
     if mcp_package_name not in sys.modules:
         mcp_package = types.ModuleType(mcp_package_name)
