@@ -97,14 +97,14 @@ def test_code_read_description_mentions_line_numbered_and_1_indexed_offset():
     assert "1-indexed" in offset["description"].lower()
 
 
-def test_code_bash_description_mentions_backend_config_availability():
-    """code-bash docs should mention backend-config-dependent availability."""
+def test_code_bash_description_mentions_workspace_shell_execution():
+    """code-bash docs should describe shell execution in the coding workspace."""
     schema = _code_schemas_by_name()["code-bash"]
     description = schema["description"].lower()
 
-    assert "backend" in description
-    assert "config" in description
-    assert "depend" in description
+    assert "workspace" in description
+    assert "shell command" in description
+    assert "backend config" not in description
 
 
 def test_code_write_description_mentions_workspace_full_content_and_parent_dirs():

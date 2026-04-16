@@ -78,7 +78,7 @@ def get_code_tool_schemas() -> List[Dict[str, Any]]:
         },
         {
             "name": "code-bash",
-            "description": "Run a shell command in the coding workspace (availability depends on backend config).",
+            "description": "Run a shell command in the current coding workspace.",
             "parameters": [
                 {
                     "name": "command",
