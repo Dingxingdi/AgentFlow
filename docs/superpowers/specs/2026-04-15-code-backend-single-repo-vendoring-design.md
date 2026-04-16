@@ -274,9 +274,9 @@ Add one end-to-end rollout smoke that exercises the real rollout-to-sandbox-to-c
 The smoke should:
 
 - live under `rollout/tests/`
-- be marked with a dedicated pytest marker, for example `code_real`
-- not run in default pytest execution
-- require explicit manual invocation
+- follow the MCP real-smoke opt-in pattern
+- not be collected in default pytest execution
+- require explicit manual invocation, for example by setting `AGENTFLOW_RUN_CODE_REAL=1`
 - use a real LLM response path and a real sandbox/code backend path
 
 This smoke should not mock sandbox components. It should really:
