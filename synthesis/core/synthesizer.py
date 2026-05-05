@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .models import Trajectory, SynthesizedQA
 from .config import SynthesisConfig
-from .utils import create_openai_client, extract_json_object, chat_completion
+from .utils import chat_completion, create_openai_client, extract_json_object, extract_message_content
 
 
 class QASynthesizer:
@@ -60,7 +60,7 @@ class QASynthesizer:
                     continue
 
             try:
-                result = json.loads(extract_json_object(response.choices[0].message.content))
+                result = json.loads(extract_json_object(extract_message_content(response)))
             except Exception as e:
                 last_failure_reason = f"Synthesis exception: {str(e)}"
                 continue

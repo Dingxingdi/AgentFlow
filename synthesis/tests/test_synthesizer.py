@@ -111,3 +111,42 @@ def test_synthesize_qa_does_not_fallback_for_rate_limit_errors_even_if_message_m
     assert qa is None
     assert len(calls) == 3
     assert all(call["response_format"] == {"type": "json_object"} for call in calls)
+
+
+def test_synthesize_qa_recovers_after_empty_content_response(monkeypatch):
+    calls = []
+
+    def fake_chat_completion(client, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=None))]
+            )
+
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="""
+                        {
+                          "question": "Which city hosts the museum identified in the final step?",
+                          "answer": "Shanghai",
+                          "reasoning_steps": [
+                            {"hop": 1, "fact": "The route ends at a museum.", "evidence": "museum stop", "output": "museum"},
+                            {"hop": 2, "fact": "The museum is in Shanghai.", "evidence": "located in Shanghai", "output": "Shanghai museum"},
+                            {"hop": 3, "fact": "The host city is Shanghai.", "evidence": "Shanghai museum", "output": "Shanghai"}
+                          ]
+                        }
+                        """
+                    )
+                )
+            ]
+        )
+
+    synthesizer = make_synthesizer(monkeypatch, fake_chat_completion)
+
+    qa = synthesizer.synthesize_qa(make_trajectory())
+
+    assert qa is not None
+    assert qa.answer == "Shanghai"
+    assert len(calls) == 2
