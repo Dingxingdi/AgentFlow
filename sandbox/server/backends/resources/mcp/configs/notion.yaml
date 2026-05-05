@@ -7,7 +7,7 @@ name: notion
 params:
   command: node
   args:
-    - "${local_servers_paths}/notion-mcp-server/environment/bin/cli-dev.mjs"
+    - "${local_servers_paths}/notion-mcp-server/bin/cli.mjs"
   env:
     OPENAPI_MCP_HEADERS: "{\"Authorization\": \"Bearer placeholder\", \"Notion-Version\": \"2022-06-28\" }"
     HTTP_PROXY: ""

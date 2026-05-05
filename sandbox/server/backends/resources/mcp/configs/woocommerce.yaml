@@ -6,7 +6,7 @@ name: woocommerce
 params:
   command: node
   args:
-    - "${local_servers_paths}/woocommerce-mcp/environment/dist/index.js"
+    - "${local_servers_paths}/woocommerce-mcp/dist/index.js"
   env:
     WORDPRESS_SITE_URL: "http://localhost"
     WOOCOMMERCE_CONSUMER_KEY: "placeholder"

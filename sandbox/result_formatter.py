@@ -572,6 +572,62 @@ class DocResult(ToolResult):
 
 
 # ============================================================================
+# MCP tool result.
+# ============================================================================
+
+class MCPResult(ToolResult):
+    """MCP tool result."""
+
+    def to_str(self, verbose: bool = False) -> str:
+        del verbose
+
+        if not self.success:
+            error_msg = self.metadata.get("message", "MCP tool failed")
+            return f"[Error] {error_msg}"
+
+        content = self.raw_data.get("content", [])
+        text_blocks = []
+        has_error_block = False
+        if isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                    and block.get("text").strip()
+                ):
+                    if block.get("error") is True:
+                        has_error_block = True
+                    text_blocks.append(block["text"].rstrip())
+
+        if text_blocks:
+            result = "\n".join(text_blocks)
+        else:
+            structured_content = self.raw_data.get("structuredContent")
+            if (
+                isinstance(structured_content, dict)
+                and isinstance(structured_content.get("content"), str)
+                and structured_content.get("content").strip()
+            ):
+                result = structured_content["content"].rstrip()
+            else:
+                fallback_data = structured_content if structured_content else self.raw_data
+                try:
+                    result = json.dumps(
+                        fallback_data,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                except Exception:
+                    result = str(fallback_data)
+
+        if self.raw_data.get("isError") or has_error_block:
+            return f"[Error] {result}"
+
+        return result
+
+
+# ============================================================================
 # SQL tool result (text2sql).
 # ============================================================================
 
@@ -724,6 +780,7 @@ class ResultFormatter:
         "vm": VMResult,
         "doc": DocResult,
         "ds": DocResult,
+        "mcp": MCPResult,
     }
 
     @classmethod

@@ -7,7 +7,7 @@ name: canvas
 params:
   command: node
   args:
-    - "${local_servers_paths}/mcp-canvas-lms/environment/build/index.js"
+    - "${local_servers_paths}/mcp-canvas-lms/build/index.js"
   env:
     CANVAS_API_TOKEN: "${token.canvas_api_token}"
     CANVAS_STUDENT_EMAIL: "${token.canvas_student_email}"

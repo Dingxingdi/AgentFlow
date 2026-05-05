@@ -97,3 +97,5 @@ sandbox/server/backends/resources/mcp/mock_runtime/.env
 sandbox/server/backends/resources/mcp/mock_runtime/certs/
 sandbox/server/backends/resources/mcp/mock_runtime/logs/
 sandbox/server/backends/resources/mcp/mock_runtime/run/
+
+docs/superpowers
